@@ -12,7 +12,7 @@ jobs:
   probe:
     name: Probe ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -22,60 +22,32 @@ jobs:
           - windows-11-arm
     env:
       WSL_UTF8: "1"
+      GH_TOKEN: ${{ github.token }}
     defaults:
       run:
         shell: pwsh
     steps:
-      - name: Host and virtualisation facts
-        continue-on-error: true
-        run: |
-          $PSVersionTable | Format-List
-          Get-CimInstance Win32_OperatingSystem | Format-List Caption, Version, BuildNumber, OSArchitecture
-          Get-CimInstance Win32_ComputerSystem | Format-List Model, Manufacturer, HypervisorPresent, NumberOfLogicalProcessors, TotalPhysicalMemory
-          Get-CimInstance Win32_Processor | Format-List Name, VirtualizationFirmwareEnabled, SecondLevelAddressTranslationExtensions, VMMonitorModeExtensions
-          systeminfo | Select-String -Pattern 'Hyper-V|hypervisor|OS Name|OS Version|System Type' -Context 0,4
-          bcdedit /enum '{current}' | Select-String -Pattern 'hypervisor'
-          Get-Service -Name WSLService, LxssManager, vmcompute, vmms, hns -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType
-
-      - name: Optional features
-        continue-on-error: true
-        run: |
-          Get-WindowsOptionalFeature -Online |
-            Where-Object { $_.FeatureName -match 'Linux|VirtualMachinePlatform|Hyper-V|HypervisorPlatform|Containers' } |
-            Format-Table FeatureName, State -AutoSize
-
-      - name: WSL before any change
-        continue-on-error: true
-        run: |
-          Get-Command wsl.exe -All -ErrorAction SilentlyContinue | Format-Table Source, Version
-          Test-Path 'C:\Program Files\WSL\wsl.exe'
-          Get-AppxPackage -AllUsers -Name '*WindowsSubsystemForLinux*' -ErrorAction SilentlyContinue | Format-List Name, Version, Architecture
-          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-            Where-Object { $_.DisplayName -match 'Subsystem for Linux' } | Format-List DisplayName, DisplayVersion
-          foreach ($a in @('--version', '--status', '--list --verbose', '--list --online')) {
-            Write-Host "::group::wsl $a"
-            & wsl.exe @($a -split ' ')
-            Write-Host "exit $LASTEXITCODE"
-            Write-Host '::endgroup::'
-          }
-
-      - name: Install or update WSL
+      - name: Install WSL from the GitHub release MSI
         continue-on-error: true
         timeout-minutes: 15
         run: |
+          $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+          $rel = gh api repos/microsoft/WSL/releases/latest | ConvertFrom-Json
+          $asset = $rel.assets | Where-Object { $_.name -match "\.$arch\.msi$" } | Select-Object -First 1
+          Write-Host "release $($rel.tag_name) asset $($asset.name) $($asset.size) bytes"
+          $msi = Join-Path $env:RUNNER_TEMP $asset.name
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          wsl.exe --install --no-distribution --web-download
-          Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
-          wsl.exe --update --web-download
-          Write-Host "update exit $LASTEXITCODE after $($sw.Elapsed)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $msi
+          Write-Host "downloaded after $($sw.Elapsed)"
+          $p = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$env:RUNNER_TEMP\wsl-msi.log`"") -Wait -PassThru
+          Write-Host "msiexec exit $($p.ExitCode) after $($sw.Elapsed)"
+          Get-Content "$env:RUNNER_TEMP\wsl-msi.log" -Tail 30
+          Get-Command wsl.exe -All | Format-Table Source, Version
           wsl.exe --version
           Write-Host "version exit $LASTEXITCODE"
           wsl.exe --status
           Write-Host "status exit $LASTEXITCODE"
-          wsl.exe --list --online
-          Get-WindowsOptionalFeature -Online |
-            Where-Object { $_.FeatureName -match 'Linux|VirtualMachinePlatform' } |
-            Format-Table FeatureName, State, RestartNeeded -AutoSize
+          Get-Service -Name WSLService -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType
 
       - name: Install Ubuntu as WSL 2
         continue-on-error: true
@@ -84,20 +56,63 @@ jobs:
           $sw = [Diagnostics.Stopwatch]::StartNew()
           wsl.exe --install Ubuntu-24.04 --name probe2 --version 2 --no-launch --web-download
           Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
-          wsl.exe --list --verbose
-          wsl.exe -d probe2 -u root -- sh -c 'uname -a; cat /etc/os-release; ps -p 1 -o comm=; command -v cloud-init && cloud-init status --long'
+          wsl.exe -d probe2 -u root -- sh -c 'uname -a; ps -p 1 -o comm=; ls -l /dev/kvm; grep -cE "vmx|svm" /proc/cpuinfo; nproc; free -m'
           Write-Host "run exit $LASTEXITCODE after $($sw.Elapsed)"
 
-      - name: Install Ubuntu as WSL 1
+      - name: Seed cloud-init
+        continue-on-error: true
+        run: |
+          $dir = Join-Path $env:USERPROFILE '.cloud-init'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          foreach ($name in @('Ubuntu-26.04', 'FedoraLinux-44')) {
+            Set-Content -Encoding utf8NoBOM -Path (Join-Path $dir "$name.meta-data") -Value "instance-id: probe-$name"
+            Set-Content -Encoding utf8NoBOM -Path (Join-Path $dir "$name.user-data") -Value @"
+          #cloud-config
+          users:
+            - name: probe
+              uid: 1000
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
+          write_files:
+            - path: /etc/wsl.conf
+              content: |
+                [boot]
+                systemd=true
+                [user]
+                default=probe
+          runcmd:
+            - echo probe-runcmd-ok > /var/tmp/probe-runcmd
+          "@
+          }
+          Get-ChildItem $dir | Format-Table Name, Length
+
+      - name: Ubuntu-26.04 with cloud-init
         continue-on-error: true
         timeout-minutes: 20
         run: |
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          wsl.exe --install Ubuntu-24.04 --name probe1 --version 1 --no-launch --web-download
+          wsl.exe --install Ubuntu-26.04 --version 2 --no-launch --web-download
           Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
           wsl.exe --list --verbose
-          wsl.exe -d probe1 -u root -- sh -c 'uname -a; ps -p 1 -o comm=; command -v cloud-init && cloud-init status --long'
-          Write-Host "run exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe -d Ubuntu-26.04 -u root -- sh -c 'cat /etc/wsl-distribution.conf; cloud-init status --wait --long; echo "status exit $?"; cat /var/tmp/probe-runcmd; id probe; cat /etc/wsl.conf'
+          Write-Host "first run exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --terminate Ubuntu-26.04
+          wsl.exe -d Ubuntu-26.04 -- sh -c 'id -un; ps -p 1 -o comm=; systemctl is-system-running'
+          Write-Host "second run exit $LASTEXITCODE after $($sw.Elapsed)"
+
+      - name: FedoraLinux-44 with cloud-init
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          wsl.exe --install FedoraLinux-44 --version 2 --no-launch --web-download
+          Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --list --verbose
+          wsl.exe -d FedoraLinux-44 -u root -- sh -c 'cat /etc/wsl-distribution.conf; command -v cloud-init && cloud-init status --wait --long; echo "status exit $?"; cat /var/tmp/probe-runcmd; id probe; cat /etc/wsl.conf'
+          Write-Host "first run exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --terminate FedoraLinux-44
+          wsl.exe -d FedoraLinux-44 -- sh -c 'id -un; ps -p 1 -o comm=; systemctl is-system-running'
+          Write-Host "second run exit $LASTEXITCODE after $($sw.Elapsed)"
 
       - name: Final state
         if: always()
@@ -105,4 +120,3 @@ jobs:
         run: |
           wsl.exe --version
           wsl.exe --list --verbose
-          Get-ChildItem "$env:USERPROFILE" -Force | Format-Table Name
