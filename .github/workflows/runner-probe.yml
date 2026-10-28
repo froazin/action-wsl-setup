@@ -1,0 +1,108 @@
+# Throwaway probe: records what each hosted Windows image can do with WSL.
+# Not for merging.
+name: Runner probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-2025
+          - windows-11-arm
+    env:
+      WSL_UTF8: "1"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Host and virtualisation facts
+        continue-on-error: true
+        run: |
+          $PSVersionTable | Format-List
+          Get-CimInstance Win32_OperatingSystem | Format-List Caption, Version, BuildNumber, OSArchitecture
+          Get-CimInstance Win32_ComputerSystem | Format-List Model, Manufacturer, HypervisorPresent, NumberOfLogicalProcessors, TotalPhysicalMemory
+          Get-CimInstance Win32_Processor | Format-List Name, VirtualizationFirmwareEnabled, SecondLevelAddressTranslationExtensions, VMMonitorModeExtensions
+          systeminfo | Select-String -Pattern 'Hyper-V|hypervisor|OS Name|OS Version|System Type' -Context 0,4
+          bcdedit /enum '{current}' | Select-String -Pattern 'hypervisor'
+          Get-Service -Name WSLService, LxssManager, vmcompute, vmms, hns -ErrorAction SilentlyContinue | Format-Table Name, Status, StartType
+
+      - name: Optional features
+        continue-on-error: true
+        run: |
+          Get-WindowsOptionalFeature -Online |
+            Where-Object { $_.FeatureName -match 'Linux|VirtualMachinePlatform|Hyper-V|HypervisorPlatform|Containers' } |
+            Format-Table FeatureName, State -AutoSize
+
+      - name: WSL before any change
+        continue-on-error: true
+        run: |
+          Get-Command wsl.exe -All -ErrorAction SilentlyContinue | Format-Table Source, Version
+          Test-Path 'C:\Program Files\WSL\wsl.exe'
+          Get-AppxPackage -AllUsers -Name '*WindowsSubsystemForLinux*' -ErrorAction SilentlyContinue | Format-List Name, Version, Architecture
+          Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -match 'Subsystem for Linux' } | Format-List DisplayName, DisplayVersion
+          foreach ($a in @('--version', '--status', '--list --verbose', '--list --online')) {
+            Write-Host "::group::wsl $a"
+            & wsl.exe @($a -split ' ')
+            Write-Host "exit $LASTEXITCODE"
+            Write-Host '::endgroup::'
+          }
+
+      - name: Install or update WSL
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          wsl.exe --install --no-distribution --web-download
+          Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --update --web-download
+          Write-Host "update exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --version
+          Write-Host "version exit $LASTEXITCODE"
+          wsl.exe --status
+          Write-Host "status exit $LASTEXITCODE"
+          wsl.exe --list --online
+          Get-WindowsOptionalFeature -Online |
+            Where-Object { $_.FeatureName -match 'Linux|VirtualMachinePlatform' } |
+            Format-Table FeatureName, State, RestartNeeded -AutoSize
+
+      - name: Install Ubuntu as WSL 2
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          wsl.exe --install Ubuntu-24.04 --name probe2 --version 2 --no-launch --web-download
+          Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --list --verbose
+          wsl.exe -d probe2 -u root -- sh -c 'uname -a; cat /etc/os-release; ps -p 1 -o comm=; command -v cloud-init && cloud-init status --long'
+          Write-Host "run exit $LASTEXITCODE after $($sw.Elapsed)"
+
+      - name: Install Ubuntu as WSL 1
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          wsl.exe --install Ubuntu-24.04 --name probe1 --version 1 --no-launch --web-download
+          Write-Host "install exit $LASTEXITCODE after $($sw.Elapsed)"
+          wsl.exe --list --verbose
+          wsl.exe -d probe1 -u root -- sh -c 'uname -a; ps -p 1 -o comm=; command -v cloud-init && cloud-init status --long'
+          Write-Host "run exit $LASTEXITCODE after $($sw.Elapsed)"
+
+      - name: Final state
+        if: always()
+        continue-on-error: true
+        run: |
+          wsl.exe --version
+          wsl.exe --list --verbose
+          Get-ChildItem "$env:USERPROFILE" -Force | Format-Table Name
