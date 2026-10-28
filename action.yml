@@ -1,0 +1,9 @@
+name: Set up WSL
+description: Set up WSL on a GitHub hosted Windows runner.
+author: froazin
+branding:
+  icon: terminal
+  color: blue
+runs:
+  using: node24
+  main: dist/index.js
