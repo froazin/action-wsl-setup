@@ -1,0 +1,58 @@
+---
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Lint, test and check dist
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Lint and check formatting
+        run: npm run check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run the unit tests
+        run: npm test
+
+      - name: Build dist
+        run: npm run build
+
+      # dist/ is what runners execute, so it must match the source in the PR.
+      - name: Check dist is up to date
+        run: |-
+          if ! git diff --exit-code --ignore-space-at-eol --text -- dist/; then
+            echo "::error::dist/ is out of date. Run 'npm run build' and commit the result."
+            exit 1
+          fi
+          untracked=$(git ls-files --others --exclude-standard -- dist/)
+          if [ -n "$untracked" ]; then
+            echo "::error::dist/ has files that aren't committed: $untracked"
+            exit 1
+          fi
