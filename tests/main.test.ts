@@ -1,11 +1,11 @@
 import * as core from '@actions/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { provision } from '../src/cloudinit/provision.js'
-import { placeSeed } from '../src/cloudinit/seed.js'
+import { placeSeed, removeSavedSeed } from '../src/cloudinit/seed.js'
 import { downloadImage } from '../src/distro/download.js'
 import { installImage, listInstances } from '../src/distro/install.js'
 import { fetchManifest } from '../src/distro/manifest.js'
-import { run } from '../src/main.js'
+import { post, run } from '../src/main.js'
 import { nativeArch, wslcPath } from '../src/wsl/exe.js'
 import { ensurePackage } from '../src/wsl/package.js'
 
@@ -20,6 +20,7 @@ vi.mock('../src/cloudinit/provision.js', async (importOriginal) => ({
 vi.mock('../src/cloudinit/seed.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/cloudinit/seed.js')>()),
   placeSeed: vi.fn(),
+  removeSavedSeed: vi.fn(),
   readInputFile: vi.fn((path: string) => `contents of ${path}`),
 }))
 vi.mock('../src/distro/manifest.js', async (importOriginal) => ({
@@ -194,5 +195,21 @@ describe('run', () => {
     vi.mocked(ensurePackage).mockRejectedValue(new Error('msiexec failed'))
     await run()
     expect(core.setFailed).toHaveBeenCalledWith('msiexec failed')
+  })
+})
+
+describe('post', () => {
+  it('removes the seed files the main step recorded', () => {
+    post()
+    expect(removeSavedSeed).toHaveBeenCalled()
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it("fails the post step when it can't remove them", () => {
+    vi.mocked(removeSavedSeed).mockImplementation(() => {
+      throw new Error('EBUSY')
+    })
+    post()
+    expect(core.setFailed).toHaveBeenCalledWith('EBUSY')
   })
 })

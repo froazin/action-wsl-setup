@@ -35,18 +35,20 @@ flowchart TD
     restart -->|"running"| done["cloud-init-status output"]
 ```
 
-`placeSeed` returns a function that removes the files it wrote, and `run` calls it in a `finally`, so the seed files go whether provisioning works or not.
+`placeSeed` returns a function that removes the files it wrote, and `run` calls it in a `finally`, so the seed files go whether provisioning works or not. A `finally` doesn't run when the runner stops the step, so `placeSeed` also records the files with `core.saveState`, and the action's post step removes them with `removeSavedSeed`.
 
 ## How it works
 
 - **Inputs first:** `readSeed` in `main.ts` checks the cloud-init inputs before anything changes on the runner. User-data needs a distribution and WSL 2, and meta-data needs user-data. WSL 1 instances don't run an init system, so cloud-init never starts in them (observed on `windows-2022`).
 - **Reading files:** `readInputFile` resolves paths against `GITHUB_WORKSPACE`. `normalise` removes a byte order mark and turns CRLF into LF, because a checkout on Windows can give the files CRLF line endings.
 - **Meta-data:** the datasource needs meta-data with an `instance-id`. Without `cloud-init-meta-data`, `buildSeed` writes `instance-id: <instance-name>`.
-- **Placing the seed:** `placeSeed` refuses to replace a seed file that's already there with other content, because on a self-hosted runner it's someone else's. An identical file is reused and left in place.
+- **Placing the seed:** `placeSeed` refuses to replace a seed file that's already there with other content, because on a self-hosted runner it's someone else's. An identical file is reused and left in place. It records the files it's about to write in the `seed-files` state first, and removes the user-data again if writing the meta-data fails.
+- **Post step:** [`index.ts`](../src/index.ts) runs `run()` as the main step and saves an `is-post` state. The runner runs the same bundle again as the post step (`post-if: always()`), which sees that state and runs `post()`. `post()` removes any recorded seed file that's still there.
 - **First boot:** `hasCloudInit` runs `command -v cloud-init` as root, which starts the instance, so systemd starts cloud-init with the seed in place. The probe found that `wsl -d <instance> -- <command>` doesn't run a distribution's first-run setup (observed).
+- **Timeout:** `parseTimeout` accepts minutes that come to at least 1 millisecond and at most 2^31-1 milliseconds (about 35,791 minutes), the most `child_process.spawn` accepts, so a bad value fails before the install rather than after it.
 - **Waiting:** `waitForCloudInit` runs `cloud-init status --wait` in one `wsl.exe` process, through `wslWithTimeout`, which kills it after `cloud-init-timeout` minutes. One process keeps a client attached for the whole wait, so WSL doesn't stop the instance as idle.
 - **Judging:** `readRun` reads `/var/lib/cloud/data/result.json`, which cloud-init writes when its last stage finishes, and `cloud-init status --format json`. `judge` needs `result.json` to exist and name the WSL datasource. It takes errors and recoverable errors from both, because `result.json` leaves recoverable errors such as deprecated keys out (observed). Any error fails the run, and any recoverable error makes it degraded.
-- **Restarting:** `restart` runs `wsl --terminate`, so changes to `/etc/wsl.conf` such as the default user take effect, then runs `systemctl is-system-running --wait` when systemd is PID 1.
+- **Restarting:** `restart` runs `wsl --terminate`, so changes to `/etc/wsl.conf` such as the default user take effect, then runs `systemctl is-system-running --wait` when systemd is PID 1, for up to 5 minutes.
 
 ## Interfaces
 
@@ -58,11 +60,12 @@ flowchart TD
 
 - cloud-init's `status --long` and the last 200 lines of `/var/log/cloud-init-output.log` are always shown, in a collapsed group, before the action judges the run.
 - A timeout, an error, a degraded run without `allow-degraded`, a datasource other than WSL and a missing `result.json` each fail with their own message.
+- systemd that hasn't finished starting after 5 minutes fails.
 - systemd `degraded` fails unless `allow-degraded` is `true`, after showing `systemctl --failed`. Any other state that isn't `running`, such as `offline`, always fails.
 
 ## Security
 
-- User-data can hold secrets. The action never prints it, and removes the seed files it wrote when it finishes.
+- User-data can hold secrets. The action never prints it, and removes the seed files it wrote when it finishes. When the job is cancelled or a timeout stops the step, the post step removes them instead. The end-to-end `timed out` case shows this in its post step's log.
 - The seed files are only read by cloud-init inside the instance the action installed. The action never runs them itself.
 
 ## Decisions
@@ -70,6 +73,7 @@ flowchart TD
 - **Judge `result.json` and `cloud-init status` together.** After its first run, Ubuntu-26.04 turns cloud-init off, and `status` then reports `disabled-by-marker-file` whether or not it ran, so only `result.json` shows a run finished. But `result.json` had no recoverable errors when `status` listed a deprecated key and a schema warning (both observed).
 - **Fail when the image has no cloud-init.** FedoraLinux-44's image has none (observed). Installing it before the first boot would make the action depend on each distribution's package manager, so the user chose to fail instead.
 - **Fail on degraded by default.** A degraded run usually means user-data that needs fixing, such as a deprecated key. `allow-degraded` covers both cloud-init and systemd.
+- **A post step for the seed files only.** The seed files can hold secrets, so they mustn't outlive a cancelled job on a self-hosted runner. The post step doesn't touch the instance or `.wslconfig`: an instance is what the workflow asked for, and hosted runners are thrown away.
 - **Don't run the distribution's first-run setup.** cloud-init and its `wsl.conf` decide the default user.
 
 ## Limits
@@ -84,3 +88,4 @@ flowchart TD
 - https://cloudinit.readthedocs.io/en/latest/reference/cli.html#status
 - https://cloudinit.readthedocs.io/en/latest/explanation/failure_states.html
 - https://nodejs.org/api/child_process.html#child_processspawncommand-args-options
+- https://docs.github.com/en/actions/reference/workflows-and-actions/metadata-syntax#runspost

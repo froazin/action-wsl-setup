@@ -9,6 +9,9 @@ export interface Seed {
   metaData: string
 }
 
+/** The state that records the seed files the action writes, for the post step to remove. */
+export const SEED_STATE = 'seed-files'
+
 /** The directory cloud-init's WSL datasource reads seed files from. */
 export function seedDir(): string {
   return join(process.env.USERPROFILE ?? homedir(), '.cloud-init')
@@ -43,6 +46,9 @@ export function buildSeed(instance: string, userData: string, metaData?: string)
  * Writes the seed files for an instance, and returns a function that removes the ones it wrote.
  * A seed file that's already there with other content is someone else's, so it fails rather than
  * replace it. One with the same content is left in place, and left behind afterwards.
+ *
+ * It records the files in SEED_STATE before writing them, so the post step can remove them when
+ * the job is cancelled or times out before the returned function runs.
  */
 export function placeSeed(instance: string, seed: Seed): () => void {
   const dir = seedDir()
@@ -58,14 +64,32 @@ export function placeSeed(instance: string, seed: Seed): () => void {
     }
   }
   mkdirSync(dir, { recursive: true })
-  const written = files.filter((file) => !existsSync(file.path))
-  for (const file of written) {
-    writeFileSync(file.path, file.content)
-    core.info(`Wrote ${file.path}`)
+  const written = files.filter((file) => !existsSync(file.path)).map((file) => file.path)
+  core.saveState(SEED_STATE, JSON.stringify(written))
+  const remove = () => removeFiles(written)
+  try {
+    for (const file of files.filter((file) => written.includes(file.path))) {
+      writeFileSync(file.path, file.content)
+      core.info(`Wrote ${file.path}`)
+    }
+  } catch (error) {
+    remove()
+    throw error
   }
-  return () => {
-    for (const file of written) {
-      rmSync(file.path, { force: true })
+  return remove
+}
+
+/** Removes the seed files recorded in SEED_STATE. The post step runs it. */
+export function removeSavedSeed(): void {
+  const saved = core.getState(SEED_STATE)
+  removeFiles(saved ? (JSON.parse(saved) as string[]) : [])
+}
+
+function removeFiles(paths: string[]): void {
+  for (const path of paths) {
+    if (existsSync(path)) {
+      rmSync(path, { force: true })
+      core.info(`Removed ${path}`)
     }
   }
 }

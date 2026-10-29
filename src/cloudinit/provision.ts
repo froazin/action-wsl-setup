@@ -18,18 +18,34 @@ export interface CloudInitRun {
   status?: Problems
 }
 
+/** How long to wait for systemd to finish starting after the restart. */
+const SYSTEMD_TIMEOUT_MINUTES = 5
+
 /** Where cloud-init writes its result when its last stage finishes. */
 const RESULT = '/var/lib/cloud/data/result.json'
 
-/** Parses the `cloud-init-timeout` input, in minutes. Empty means 15. */
+/** The longest timeout child_process.spawn accepts, in milliseconds: about 35,791 minutes. */
+const MAX_TIMEOUT_MS = 2 ** 31 - 1
+
+/**
+ * Parses the `cloud-init-timeout` input, in minutes. Empty means 15. It must come to at least one
+ * whole millisecond, and no more than spawn accepts, so a bad value fails before the install.
+ */
 export function parseTimeout(input: string): number {
   const value = input.trim()
   if (value === '') return 15
   const minutes = Number(value)
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    throw new Error(`cloud-init-timeout must be a number of minutes above 0, not "${value}".`)
+  const ms = Math.round(minutes * 60_000)
+  if (!Number.isFinite(minutes) || ms < 1 || ms > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `cloud-init-timeout must be a number of minutes above 0 and up to ${Math.floor(MAX_TIMEOUT_MS / 60_000)}, not "${value}".`,
+    )
   }
   return minutes
+}
+
+function toMs(minutes: number): number {
+  return Math.round(minutes * 60_000)
 }
 
 /** True when the instance has cloud-init. Running the check starts the instance. */
@@ -53,7 +69,7 @@ export async function hasCloudInit(instance: string): Promise<boolean> {
  */
 export async function waitForCloudInit(instance: string, minutes: number): Promise<void> {
   const args = ['-d', instance, '-u', 'root', '--', 'cloud-init', 'status', '--wait']
-  const result = await wslWithTimeout(args, minutes * 60_000)
+  const result = await wslWithTimeout(args, toMs(minutes))
   if (result.timedOut) {
     throw new Error(
       `cloud-init didn't finish in ${instance} within ${minutes} minutes. Raise cloud-init-timeout if it needs longer.`,
@@ -151,8 +167,13 @@ export async function restart(instance: string, allowDegraded: boolean): Promise
     'if [ "$(cat /proc/1/comm)" = systemd ]; then systemctl is-system-running --wait; else echo no-systemd; fi'
   const result = await wslWithTimeout(
     ['-d', instance, '-u', 'root', '--', 'sh', '-c', script],
-    300_000,
+    toMs(SYSTEMD_TIMEOUT_MINUTES),
   )
+  if (result.timedOut) {
+    throw new Error(
+      `systemd didn't finish starting in ${instance} within ${SYSTEMD_TIMEOUT_MINUTES} minutes after cloud-init.`,
+    )
+  }
   const state = result.stdout.trim().split('\n').at(-1) ?? ''
   core.info(`After a restart, ${instance}'s systemd state is ${state || 'unknown'}.`)
   if (state === 'running' || state === 'no-systemd') {

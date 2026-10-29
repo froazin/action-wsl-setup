@@ -18,7 +18,7 @@ if ($user -ne 'tester') { Fail "The default user is '$user', not tester." }
 $marker = & $wsl -d $Instance -u root -- cat /var/tmp/provisioned
 if ($LASTEXITCODE -ne 0 -or $marker -ne 'provisioned') { Fail "runcmd didn't write /var/tmp/provisioned." }
 
-$state = (& $wsl -d $Instance -u root -- systemctl is-system-running | Select-Object -Last 1).Trim()
+$state = (& $wsl -d $Instance -u root -- systemctl is-system-running --wait | Select-Object -Last 1).Trim()
 if ($state -ne 'running') { Fail "systemd is '$state', not running." }
 
 foreach ($extension in 'user-data', 'meta-data') {

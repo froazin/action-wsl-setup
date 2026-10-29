@@ -1,6 +1,12 @@
 import * as core from '@actions/core'
 import { parseTimeout, provision } from './cloudinit/provision.js'
-import { buildSeed, placeSeed, readInputFile, type Seed } from './cloudinit/seed.js'
+import {
+  buildSeed,
+  placeSeed,
+  readInputFile,
+  removeSavedSeed,
+  type Seed,
+} from './cloudinit/seed.js'
 import { downloadImage } from './distro/download.js'
 import {
   checkInstanceName,
@@ -70,6 +76,18 @@ export async function run(): Promise<void> {
     } finally {
       removeSeed?.()
     }
+  } catch (error) {
+    core.setFailed(error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * Runs after the job's steps, even when the job is cancelled or times out, and removes any seed
+ * files run() didn't get to remove. They can hold secrets.
+ */
+export function post(): void {
+  try {
+    removeSavedSeed()
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error))
   }

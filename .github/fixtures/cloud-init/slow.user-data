@@ -1,0 +1,4 @@
+#cloud-config
+# Keeps cloud-init busy, so the step times out while the seed files are in place.
+runcmd:
+  - sleep 1200

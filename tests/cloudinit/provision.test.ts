@@ -13,11 +13,13 @@ describe('parseTimeout', () => {
     ['', 15],
     ['30', 30],
     [' 2.5 ', 2.5],
+    ['35791', 35791],
   ])('parses %j as %d minutes', (input, minutes) => {
     expect(parseTimeout(input)).toBe(minutes)
   })
 
-  it.each(['0', '-1', 'ten', 'Infinity'])('rejects %j', (input) => {
+  // 0.000001 minutes rounds to 0 ms, and 35792 minutes is more than spawn accepts.
+  it.each(['0', '-1', 'ten', 'Infinity', '0.000001', '35792'])('rejects %j', (input) => {
     expect(() => parseTimeout(input)).toThrow(/cloud-init-timeout/)
   })
 })
@@ -118,6 +120,10 @@ describe('provision', () => {
       ['-d', 'ci', '-u', 'root', '--', 'cloud-init', 'status', '--wait'],
       900_000,
     )
+    expect(wslWithTimeout).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.stringMatching(/is-system-running --wait/)]),
+      300_000,
+    )
     expect(wsl).toHaveBeenCalledWith(
       expect.arrayContaining(['-d', 'ci', 'sh', '-c', expect.stringMatching(/cloud-init-output/)]),
     )
@@ -167,6 +173,17 @@ describe('provision', () => {
   it('fails when systemd never started, even when degraded is allowed', async () => {
     responses.systemd = 'offline\n'
     await expect(provision('ci', 15, true)).rejects.toThrow(/systemd is offline/)
+  })
+
+  it('fails when systemd never finishes starting', async () => {
+    vi.mocked(wslWithTimeout).mockImplementation(async (args) => ({
+      exitCode: 1,
+      stdout: '',
+      timedOut: args.join(' ').includes('is-system-running'),
+    }))
+    await expect(provision('ci', 15, false)).rejects.toThrow(
+      /systemd didn't finish starting in ci within 5 minutes/,
+    )
   })
 
   it('accepts an instance without systemd', async () => {

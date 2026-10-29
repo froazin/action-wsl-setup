@@ -13,7 +13,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 | Path | Holds |
 | --- | --- |
 | `action.yml` | The action's metadata: name, inputs, outputs and the `node24` entry point |
-| `src/` | The TypeScript source. `index.ts` is the entry point ncc bundles, and `main.ts` holds `run()` |
+| `src/` | The TypeScript source. `index.ts` is the entry point ncc bundles, for both the main and the post step, and `main.ts` holds `run()` and `post()` |
 | `src/wsl/` | Running `wsl.exe`, and finding and installing the WSL package. Before you change it, read [docs/wsl-package.md](docs/wsl-package.md) |
 | `src/distro/` | Finding, downloading, caching and installing distribution images. Before you change it, read [docs/distributions.md](docs/distributions.md) |
 | `src/cloudinit/` | Placing cloud-init seed files, waiting for cloud-init and judging the result. Before you change it, read [docs/cloud-init.md](docs/cloud-init.md) |

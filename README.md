@@ -48,7 +48,7 @@ Give the action cloud-init user-data, and it provisions the instance on its firs
           cloud-init-user-data: ci/Ubuntu-26.04.user-data
 ```
 
-The action puts the user-data, and meta-data if you give it, in `%USERPROFILE%\.cloud-init` before the instance first starts. It then waits for cloud-init, shows cloud-init's log and fails the step if cloud-init failed. Afterwards it restarts the instance, so changes cloud-init made to `/etc/wsl.conf`, such as the default user, take effect, and checks systemd started cleanly. It removes the seed files it wrote.
+The action puts the user-data, and meta-data if you give it, in `%USERPROFILE%\.cloud-init` before the instance first starts. It then waits for cloud-init, shows cloud-init's log and fails the step if cloud-init failed. Afterwards it restarts the instance, so changes cloud-init made to `/etc/wsl.conf`, such as the default user, take effect, and checks systemd started cleanly. It removes the seed files it wrote, and its post step removes them if the job is cancelled or times out first.
 
 cloud-init needs WSL 2 and a distribution whose image includes it, such as `Ubuntu-26.04`. `FedoraLinux-44`'s image doesn't include it. If a seed file for the instance is already in `%USERPROFILE%\.cloud-init` with other content, the action fails rather than replace it.
 
@@ -67,7 +67,7 @@ cloud-init needs WSL 2 and a distribution whose image includes it, such as `Ubun
 | `cache` | `true` | Keep downloaded distribution images in the Actions cache |
 | `cloud-init-user-data` | Empty | Path to cloud-init user-data for the instance's first boot, relative to the workspace |
 | `cloud-init-meta-data` | Empty | Path to cloud-init meta-data. Without it, the action writes meta-data with `instance-id` set to the instance's name |
-| `cloud-init-timeout` | `15` | Minutes to wait for cloud-init before failing |
+| `cloud-init-timeout` | `15` | Minutes to wait for cloud-init before failing, above 0 and up to 35791 |
 | `allow-degraded` | `false` | Accept cloud-init finishing with recoverable errors, such as a deprecated key, or systemd starting with failed units, with a warning instead of failing |
 
 ### Outputs

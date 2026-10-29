@@ -230,6 +230,13 @@ jobs:
             user-data: ok.user-data
             wsl-version: 1
             expect: failure
+          # The step times out while cloud-init runs. The post step's log shows it removed the seed.
+          - case: timed out
+            os: windows-2025
+            distribution: Ubuntu-26.04
+            user-data: slow.user-data
+            step-timeout: 5
+            expect: failure
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -240,6 +247,7 @@ jobs:
         id: wsl
         uses: ./
         continue-on-error: ${{ matrix.expect == 'failure' }}
+        timeout-minutes: ${{ matrix.step-timeout || 25 }}
         with:
           distribution: ${{ matrix.distribution }}
           wsl-version: ${{ matrix.wsl-version || 2 }}

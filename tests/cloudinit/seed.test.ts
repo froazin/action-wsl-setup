@@ -1,16 +1,25 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as core from '@actions/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildSeed,
   normalise,
   placeSeed,
   readInputFile,
+  removeSavedSeed,
+  SEED_STATE,
   seedDir,
 } from '../../src/cloudinit/seed.js'
 
 vi.mock('@actions/core')
+vi.mock('node:fs', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs')>()
+  return { ...fs, writeFileSync: vi.fn(fs.writeFileSync) }
+})
+
+const realFs = await vi.importActual<typeof import('node:fs')>('node:fs')
 
 let home: string
 
@@ -69,6 +78,28 @@ describe('placeSeed', () => {
     expect(existsSync(userData)).toBe(false)
   })
 
+  it('records the files it writes before writing them', () => {
+    vi.mocked(writeFileSync).mockImplementationOnce(() => {
+      expect(core.saveState).toHaveBeenCalledWith(
+        SEED_STATE,
+        JSON.stringify([join(seedDir(), 'ci.user-data'), join(seedDir(), 'ci.meta-data')]),
+      )
+    })
+    placeSeed('ci', seed)
+    expect(writeFileSync).toHaveBeenCalledTimes(2)
+  })
+
+  it('removes the user-data when writing the meta-data fails', () => {
+    vi.mocked(writeFileSync)
+      .mockImplementationOnce(realFs.writeFileSync)
+      .mockImplementationOnce(() => {
+        throw new Error('disk full')
+      })
+    expect(() => placeSeed('ci', seed)).toThrow('disk full')
+    expect(writeFileSync).toHaveBeenCalledTimes(2)
+    expect(existsSync(join(seedDir(), 'ci.user-data'))).toBe(false)
+  })
+
   it("refuses to replace someone else's seed file", () => {
     mkdirSync(seedDir(), { recursive: true })
     writeFileSync(join(seedDir(), 'ci.user-data'), '#cloud-config\npackages: [git]\n')
@@ -84,5 +115,24 @@ describe('placeSeed', () => {
     remove()
     expect(existsSync(userData)).toBe(true)
     expect(existsSync(join(seedDir(), 'ci.meta-data'))).toBe(false)
+  })
+})
+
+describe('removeSavedSeed', () => {
+  it('removes the files placeSeed recorded', () => {
+    let saved = ''
+    vi.mocked(core.saveState).mockImplementation((_name, value) => {
+      saved = value
+    })
+    placeSeed('ci', { userData: 'u', metaData: 'm' })
+    vi.mocked(core.getState).mockReturnValue(saved)
+    removeSavedSeed()
+    expect(existsSync(join(seedDir(), 'ci.user-data'))).toBe(false)
+    expect(existsSync(join(seedDir(), 'ci.meta-data'))).toBe(false)
+  })
+
+  it('does nothing when nothing was recorded', () => {
+    vi.mocked(core.getState).mockReturnValue('')
+    expect(() => removeSavedSeed()).not.toThrow()
   })
 })
