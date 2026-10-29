@@ -35,4 +35,7 @@ Runners execute `dist/`, not `src/`. Run `npm run build` and commit `dist/` with
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every PR to `main`, on Ubuntu. It lints, type checks, runs the unit tests, rebuilds `dist/` and fails if the result differs from the committed `dist/`.
+Two workflows run on every PR to `main`:
+
+- `.github/workflows/ci.yml` runs on Ubuntu. It lints, type checks, runs the unit tests, rebuilds `dist/` and fails if the result differs from the committed `dist/`.
+- `.github/workflows/e2e.yml` runs the action from the PR's `dist/` on the `windows-2025`, `windows-2022` and `windows-11-arm` runners and checks what it did. It also checks that the action fails cleanly on Linux. The unit tests can't cover this, because they don't run on Windows.

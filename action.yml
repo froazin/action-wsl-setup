@@ -1,9 +1,30 @@
 name: Set up WSL
-description: Set up WSL on a GitHub hosted Windows runner.
+description: Set up WSL on a GitHub hosted or self-hosted Windows runner.
 author: froazin
 branding:
   icon: terminal
   color: blue
+inputs:
+  wsl-package-version:
+    description: >-
+      The WSL package to use. Leave it empty to use the runner's package, or install the newest
+      release when the runner has none. Use "latest" for the newest release, or a release such as
+      "3.0.3" to install exactly that one.
+    required: false
+    default: ""
+  token:
+    description: >-
+      A GitHub token for looking up WSL releases on github.com, which avoids the API's
+      unauthenticated rate limit.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  wsl-package-version:
+    description: The installed WSL package version, such as "3.0.3.0".
+  kernel-version:
+    description: The WSL kernel version, such as "6.18.54.1-1".
+  wslc-path:
+    description: The path to wslc.exe, WSL's container CLI, or empty when the package doesn't have one.
 runs:
   using: node24
   main: dist/index.js

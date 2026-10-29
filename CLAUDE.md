@@ -1,6 +1,6 @@
 # action-wsl-setup
 
-A GitHub Action that sets up WSL 2 on GitHub hosted Windows runners. It's written in TypeScript and bundled into JavaScript with ncc.
+A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runners. It's written in TypeScript and bundled into JavaScript with ncc.
 
 ## Contents
 
@@ -14,15 +14,19 @@ A GitHub Action that sets up WSL 2 on GitHub hosted Windows runners. It's writte
 | --- | --- |
 | `action.yml` | The action's metadata: name, inputs, outputs and the `node24` entry point |
 | `src/` | The TypeScript source. `index.ts` is the entry point ncc bundles, and `main.ts` holds `run()` |
+| `src/wsl/` | Running `wsl.exe`, and finding and installing the WSL package. Before you change it, read [docs/wsl-package.md](docs/wsl-package.md) |
 | `tests/` | Vitest unit tests, one `<module>.test.ts` per module in `src/` |
 | `dist/` | The bundle runners execute, built by `npm run build`. Never edit it by hand |
-| `.github/workflows/` | CI. `ci.yml` lints, tests and checks that `dist/` is up to date |
+| `docs/` | Design docs, one per part of the action |
+| `.github/workflows/` | CI. `ci.yml` lints, tests and checks that `dist/` is up to date. `e2e.yml` runs the action on the hosted Windows images |
 
 ## Conventions
 
 - Rebuild `dist/` and commit it with every change to `src/`, `package.json` or `package-lock.json`. CI fails when it's out of date.
 - The code is ESM. Import relative modules with a `.js` extension, such as `./main.js`.
-- Support only WSL 2, and only on the `windows-2025` runner image. Don't add WSL 1, a fallback to it, or other runner images. Fail with a clear message instead.
+- Keep the action generic: other people use it for their own purposes. It supports every hosted Windows image and self-hosted runners, so don't check for particular runner images. Rely on what WSL reports, and fail with its error.
+- Run `wsl.exe` only through `wsl()` in [`src/wsl/exe.ts`](src/wsl/exe.ts), never by a bare `wsl` name.
+- Update the README's inputs and outputs, and the design doc in `docs/`, in the same PR as the code they describe.
 - Keep TypeScript on 6.0.x. ncc 0.45 compiles through TypeScript's JavaScript compiler API, which TypeScript 7 no longer has, so a TypeScript 7 build fails in ncc's ts-loader (observed).
 - Install dependencies only through npm with this repository's `.npmrc`. Its `min-release-age=7` skips any version published in the last 7 days. Don't override it.
 - Pin every action a workflow uses to a full commit SHA, with its version in a comment.
