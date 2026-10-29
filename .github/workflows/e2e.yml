@@ -61,8 +61,11 @@ jobs:
           if (-not $env:PACKAGE) { Fail 'wsl-package-version is empty.' }
           if (-not $env:KERNEL) { Fail 'kernel-version is empty.' }
 
-          $first = (& "$env:ProgramFiles\WSL\wsl.exe" --version | Select-Object -First 1)
+          # Collect the output before picking a line: Select-Object -First stops wsl.exe early,
+          # and then $LASTEXITCODE isn't set.
+          $output = & "$env:ProgramFiles\WSL\wsl.exe" --version
           if ($LASTEXITCODE -ne 0) { Fail "wsl.exe --version exited with $LASTEXITCODE." }
+          $first = $output | Select-Object -First 1
           if (-not $first.EndsWith($env:PACKAGE)) { Fail "wsl.exe reports '$first', not $env:PACKAGE." }
 
           if ($env:WANT -and -not $env:PACKAGE.StartsWith("$env:WANT.")) {
