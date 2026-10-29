@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { join } from 'node:path'
 import * as core from '@actions/core'
+import { resolveInputPath } from '../files.js'
 
 /** The user-data and meta-data for an instance's first boot. */
 export interface Seed {
@@ -25,13 +26,9 @@ export function normalise(content: string): string {
   return content.replace(/^﻿/, '').replace(/\r\n/g, '\n')
 }
 
-/** Resolves a path input against the workspace and reads it, failing if it doesn't exist. */
+/** Reads a path input as a seed file, failing if it doesn't exist. */
 export function readInputFile(path: string, input: string): string {
-  const full = isAbsolute(path) ? path : resolve(process.env.GITHUB_WORKSPACE ?? '.', path)
-  if (!existsSync(full)) {
-    throw new Error(`${input} is ${path}, but ${full} doesn't exist.`)
-  }
-  return normalise(readFileSync(full, 'utf8'))
+  return normalise(readFileSync(resolveInputPath(path, input), 'utf8'))
 }
 
 /**

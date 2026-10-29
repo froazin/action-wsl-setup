@@ -6,12 +6,18 @@ import { downloadImage } from '../src/distro/download.js'
 import { installImage, listInstances } from '../src/distro/install.js'
 import { fetchManifest } from '../src/distro/manifest.js'
 import { post, run } from '../src/main.js'
+import { applyWslConfig, checkWslConfig } from '../src/wsl/config.js'
 import { nativeArch, wslcPath } from '../src/wsl/exe.js'
 import { ensurePackage } from '../src/wsl/package.js'
 
 vi.mock('@actions/core')
 vi.mock('../src/wsl/package.js')
 vi.mock('../src/wsl/exe.js')
+vi.mock('../src/wsl/config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/wsl/config.js')>()),
+  applyWslConfig: vi.fn(),
+  checkWslConfig: vi.fn(),
+}))
 vi.mock('../src/distro/download.js')
 vi.mock('../src/cloudinit/provision.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/cloudinit/provision.js')>()),
@@ -35,6 +41,7 @@ vi.mock('../src/distro/install.js', async (importOriginal) => ({
 
 const SHA = 'a'.repeat(64)
 const removeSeed = vi.fn()
+const WRITE = { write: true, content: '[wsl2]\n', replacing: false } as const
 
 describe('run', () => {
   const inputs: Record<string, string> = {}
@@ -58,6 +65,7 @@ describe('run', () => {
     vi.mocked(downloadImage).mockResolvedValue({ path: 'D:\\a\\_temp\\u.wsl', cacheHit: true })
     vi.mocked(provision).mockResolvedValue('done')
     vi.mocked(placeSeed).mockReturnValue(removeSeed)
+    vi.mocked(checkWslConfig).mockReturnValue(WRITE)
     Object.defineProperty(process, 'platform', { value: 'win32' })
   })
 
@@ -71,6 +79,43 @@ describe('run', () => {
     expect(core.setOutput).toHaveBeenCalledWith('wsl-package-version', '3.0.3.0')
     expect(core.setOutput).toHaveBeenCalledWith('kernel-version', '6.18.54.1-1')
     expect(core.setOutput).toHaveBeenCalledWith('wslc-path', 'C:\\Program Files\\WSL\\wslc.exe')
+  })
+
+  it('sets up .wslconfig after the distribution checks and before the install', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['wslconfig-overwrite'] = 'true'
+    await run()
+    expect(checkWslConfig).toHaveBeenCalledWith({ kind: 'default' }, true)
+    expect(applyWslConfig).toHaveBeenCalledWith(WRITE)
+    const order = (fn: unknown) =>
+      vi.mocked(fn as () => void).mock.invocationCallOrder[0] ?? Number.NaN
+    expect(order(checkWslConfig)).toBeLessThan(order(ensurePackage))
+    expect(order(fetchManifest)).toBeLessThan(order(applyWslConfig))
+    expect(order(applyWslConfig)).toBeLessThan(order(installImage))
+  })
+
+  it('fails on a missing wslconfig file before changing the runner', async () => {
+    inputs.wslconfig = 'missing.wslconfig'
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wslconfig is missing/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('fails on a conflicting .wslconfig before changing the runner', async () => {
+    vi.mocked(checkWslConfig).mockImplementation(() => {
+      throw new Error('Set wslconfig-overwrite to true to replace it.')
+    })
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wslconfig-overwrite/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('leaves .wslconfig alone when the instance name is taken', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    vi.mocked(listInstances).mockResolvedValue([{ name: 'Ubuntu-26.04', version: 2 }])
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/already has an instance/))
+    expect(applyWslConfig).not.toHaveBeenCalled()
   })
 
   it("doesn't install a distribution unless one is asked for", async () => {
