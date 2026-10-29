@@ -11,15 +11,22 @@ export async function get(
   what: string,
 ): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
+    let response: Response
     try {
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) })
-      if (response.status < 500 || attempt === 3) {
-        return response
-      }
+      response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) })
     } catch (error) {
       if (attempt === 3) {
         throw new Error(`Couldn't fetch ${what} from ${url}: ${describe(error)}`)
       }
+      await sleep(2000 * attempt)
+      continue
+    }
+    // fetch follows redirects, including from https to http.
+    if (response.redirected && !response.url.startsWith('https://')) {
+      throw new Error(`Couldn't fetch ${what}: ${url} redirected to ${response.url}, not https.`)
+    }
+    if (response.status < 500 || attempt === 3) {
+      return response
     }
     await sleep(2000 * attempt)
   }

@@ -49,7 +49,7 @@ describe('downloadImage', () => {
       path: expectedPath,
       cacheHit: false,
     })
-    expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath, undefined, undefined)
+    expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath, undefined)
     expect(cache.saveCache).toHaveBeenCalledWith([expectedPath], `wsl-image-${IMAGE.sha256}`)
   })
 
@@ -124,6 +124,27 @@ describe('downloadImage', () => {
     vi.mocked(cache.saveCache).mockResolvedValue(42)
     await downloadImage(IMAGE, true)
     expect(core.info).toHaveBeenCalledWith('Saved ubuntu.wsl to the cache.')
+  })
+})
+
+describe('downloadImage with a registry token', () => {
+  it('gets the token just before the download, and passes it as auth', async () => {
+    const authorize = vi.fn(async () => 'Bearer fresh')
+    await downloadImage({ ...IMAGE, authorize }, true)
+    expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath, 'Bearer fresh')
+    expect(authorize.mock.invocationCallOrder[0]).toBeGreaterThan(
+      vi.mocked(cache.restoreCache).mock.invocationCallOrder[0] ?? Number.NaN,
+    )
+  })
+
+  it("doesn't ask for a token when the cache has the image", async () => {
+    const authorize = vi.fn(async () => 'Bearer fresh')
+    vi.mocked(cache.restoreCache).mockImplementation(async (paths) => {
+      put(paths[0] as string)
+      return 'key'
+    })
+    await downloadImage({ ...IMAGE, authorize }, true)
+    expect(authorize).not.toHaveBeenCalled()
   })
 })
 

@@ -1,4 +1,5 @@
 import { resolveInputPath } from '../files.js'
+import { parseOciReference } from './oci.js'
 
 /** Where the `image` input says to get a distribution image from. */
 export type ImageSource =
@@ -37,7 +38,10 @@ export function parseImageSource(input: string, sha256Input: string): ImageSourc
         "image-sha256 doesn't apply to an oci:// image, which is checked against its registry's digests. Pin it with @sha256:<digest> instead.",
       )
     }
-    return { kind: 'oci', reference: value.slice('oci://'.length) }
+    const reference = value.slice('oci://'.length)
+    // Checked now, so a typo fails before anything changes on the runner.
+    parseOciReference(reference)
+    return { kind: 'oci', reference }
   }
   return { kind: 'file', path: resolveInputPath(value, 'image'), sha256 }
 }

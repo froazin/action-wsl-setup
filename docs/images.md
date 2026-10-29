@@ -53,30 +53,30 @@ sequenceDiagram
 
 ## How it works
 
-- **Inputs first:** `parseImageSource` runs with the other input checks. `image` and `distribution` can't both be set, and `image` needs `instance-name`, because there's no distribution name to default to. A file must exist and be a file.
-- **References:** `parseOciReference` splits a reference as `docker pull` does. A first part with a `.` or `:`, or `localhost`, is the registry. Without one, the image is on Docker Hub, at `registry-1.docker.io`, and a one-part name is under `library/`. A reference with `@sha256:` fetches the manifest by that digest.
-- **Signing in:** registries such as `ghcr.io` and Docker Hub answer an anonymous request with `401` and a `WWW-Authenticate: Bearer` challenge (observed). `Registry` asks the challenge's `realm` for a token with its `service` and `scope`, and sends it as `Authorization: Bearer` from then on.
+- **Inputs first:** `parseImageSource` runs with the other input checks, and parses an `oci://` reference there too, so a typo fails before the WSL package changes. `image` and `distribution` can't both be set, and `image` needs `instance-name`, because there's no distribution name to default to. A file must exist and be a file.
+- **References:** `parseOciReference` splits a reference as `docker pull` does. A first part with a `.` or `:`, or `localhost`, is the registry. Without one, or with the legacy `index.docker.io`, the image is on Docker Hub, at `registry-1.docker.io`, and a one-part name is under `library/`. Repository names follow the distribution spec's grammar, which allows `__` and runs of `-`. A reference with `@sha256:` fetches the manifest by that digest.
+- **Signing in:** registries such as `ghcr.io` and Docker Hub answer an anonymous request with `401` and a `WWW-Authenticate: Bearer` challenge (observed). `Registry` asks the challenge's `realm` for a token with its `service` and `scope`, and sends it as `Authorization: Bearer` for the manifests. It keeps the challenge, and `DistroImage.authorize` gets a new token just before the blob download, because Docker Hub's anonymous tokens last 5 minutes and the cache restore comes first.
 - **Architecture:** an image index lists a manifest for each platform. `resolveOciImage` picks the `linux` one whose architecture matches `nativeArch`, `amd64` for `x64` and `arm64` for `arm64`.
 - **Layer:** the image is the manifest's only layer, or the one layer whose `org.opencontainers.image.title` ends in `.wsl`, `.tar` or `.tar.gz`, as `oras push` names a file. The download is saved under that title, or as `<repository>.wsl` for a gzipped layer, because a `.wsl` file is a gzipped tar.
-- **Downloading:** the blob URL and the token go to `downloadImage`, so an OCI image is cached by its layer digest like any other image. `@actions/http-client` drops the `Authorization` header when the registry redirects to storage on another host.
+- **Downloading:** the blob URL and `authorize` go to `downloadImage`, so an OCI image is cached by its layer digest like any other image, and a cache hit never asks for a token. The token goes to `downloadTool` as its `auth` argument, not in a headers object. `@actions/http-client` drops the `Authorization` header when the registry redirects to storage on another host by deleting it from the headers object, so a shared object would leave `downloadTool`'s retries without it. `auth` is set afresh on each try.
 - **Files:** `useLocalImage` checks a file against `image-sha256` when it's given, and installs it from where it is, without copying or caching it.
 
 ## Interfaces
 
 - **Inputs:** `image`, `image-sha256` and `instance-name`, described in [`action.yml`](../action.yml) and the README.
-- **`DistroImage.headers`:** headers `downloadImage` sends with the download, such as the registry's token.
+- **`DistroImage.authorize`:** gets the `Authorization` header `downloadImage` sends with the download, such as the registry's token.
 
 ## Errors and logging
 
-- A URL without `image-sha256`, a plain `http://` URL and an `image-sha256` with an `oci://` reference fail before the runner changes.
-- A registry that wants credentials fails with "The action can only pull public images".
+- A URL without `image-sha256`, a plain `http://` URL, a malformed `oci://` reference and an `image-sha256` with an `oci://` reference fail before the runner changes.
+- A registry that refuses a manifest fails with its status and a reason: `401` and `403` say the action can only pull public images, `404` says to check the name and tag, and `429` says the registry is limiting pulls, with its `Retry-After`. A response that isn't JSON fails with its content type.
 - An index without a `linux` image for the runner's architecture fails, listing the architectures it has.
 - A manifest that doesn't match a pinned digest, and a download that doesn't match its SHA-256, fail and name both values.
 
 ## Security
 
 - Every downloaded image is checked against a SHA-256 before it's used or cached: the one in `image-sha256` for a URL, and the layer's digest for an OCI image.
-- An OCI tag can move, but the manifests are fetched over HTTPS from the registry, and the layer must match the digest the manifest lists. `@sha256:` pins the manifest itself.
+- An OCI tag can move, but the manifests are fetched over HTTPS from the registry, and the layer must match the digest the manifest lists. `@sha256:` pins the manifest itself. `get` in [`src/http.ts`](../src/http.ts) refuses a redirect from `https` to `http`, which `fetch` would otherwise follow.
 - The action never sends the workflow's `token` to a registry. It only uses the anonymous token the registry hands out.
 - A layer's title is only used as the file name when it's letters, digits, `.`, `_` and `-`.
 
@@ -90,7 +90,8 @@ sequenceDiagram
 ## Limits
 
 - Only `sha256` digests are supported.
-- A `.tar.gz` that isn't a `.wsl` image installs as WSL treats any tar, without a distribution's first-run setup or default user.
+- A `.tar.gz` that isn't a `.wsl` image, such as Alpine's minirootfs, installs as WSL treats any tar (observed), without a distribution's first-run setup or default user.
+- An index entry that's itself an index isn't followed, and a `429` isn't retried.
 - An image with several layers needs one titled as the image. The action doesn't merge layers into a root file system.
 
 ## Sources

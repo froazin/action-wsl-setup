@@ -38,6 +38,13 @@ describe('parseImageSource', () => {
     })
   })
 
+  it.each(['oci://', 'oci://ghcr.io/Owner/wsl:1', 'oci://ghcr.io/o/wsl@sha256:abc'])(
+    'fails on the malformed reference %s',
+    (input) => {
+      expect(() => parseImageSource(input, '')).toThrow(/image /)
+    },
+  )
+
   it("doesn't take a SHA-256 with an oci:// reference", () => {
     expect(() => parseImageSource('oci://ghcr.io/owner/wsl:fedora', SHA)).toThrow(/@sha256/)
   })

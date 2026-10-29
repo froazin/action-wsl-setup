@@ -49,7 +49,9 @@ export async function downloadImage(
   }
 
   core.info(`Downloading ${image.url}`)
-  await downloadTool(image.url, path, undefined, image.headers)
+  // downloadTool sets auth afresh on each try. A shared headers object would lose it after a
+  // redirect to storage on another host, because @actions/http-client deletes it from the object.
+  await downloadTool(image.url, path, await image.authorize?.())
   const actual = await sha256(path)
   if (actual !== image.sha256) {
     rmSync(path, { force: true })

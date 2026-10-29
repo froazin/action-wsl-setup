@@ -32,6 +32,14 @@ describe('parseOciReference', () => {
       'owner/image',
       { registry: 'registry-1.docker.io', repository: 'owner/image', reference: 'latest' },
     ],
+    [
+      'index.docker.io/alpine:3.22',
+      { registry: 'registry-1.docker.io', repository: 'library/alpine', reference: '3.22' },
+    ],
+    [
+      'ghcr.io/o/my--repo/foo__bar:1',
+      { registry: 'ghcr.io', repository: 'o/my--repo/foo__bar', reference: '1' },
+    ],
   ])('splits %s', (input, expected) => {
     expect(parseOciReference(input)).toEqual({ ...expected, digest: undefined })
   })
@@ -127,30 +135,31 @@ describe('resolveOciImage', () => {
   })
 
   it('picks the manifest for the architecture and its layer', async () => {
-    await expect(resolveOciImage('ghcr.io/o/wsl:tag', 'x64')).resolves.toEqual({
+    const image = await resolveOciImage('ghcr.io/o/wsl:tag', 'x64')
+    expect(image).toMatchObject({
       name: 'ghcr.io/o/wsl:tag',
       url: `https://ghcr.io/v2/o/wsl/blobs/${LAYER}`,
       sha256: 'c'.repeat(64),
       fileName: 'wsl.wsl',
-      headers: {},
     })
+    await expect(image.authorize?.()).resolves.toBeUndefined()
   })
 
-  it('signs in anonymously when the registry asks, and downloads with the token', async () => {
-    let signedIn = false
+  it('signs in anonymously when the registry asks, and again for the download', async () => {
+    let tokens = 0
     responses['https://ghcr.io/v2/o/wsl/manifests/tag'] = () =>
-      signedIn
+      tokens > 0
         ? new Response(index)
         : new Response('', { status: 401, headers: { 'WWW-Authenticate': challenge } })
     responses['https://ghcr.io/token?service=ghcr.io&scope=repository%3Ao%2Fwsl%3Apull'] = () => {
-      signedIn = true
-      return Response.json({ token: 'anonymous' })
+      tokens++
+      return Response.json({ token: `anonymous-${tokens}` })
     }
     const image = await resolveOciImage('ghcr.io/o/wsl:tag', 'x64')
-    expect(image.headers).toEqual({ Authorization: 'Bearer anonymous' })
-    expect(get).toHaveBeenLastCalledWith(
+    await expect(image.authorize?.()).resolves.toBe('Bearer anonymous-2')
+    expect(get).toHaveBeenCalledWith(
       expect.stringContaining('/manifests/sha256:'),
-      expect.objectContaining({ Authorization: 'Bearer anonymous' }),
+      expect.objectContaining({ Authorization: 'Bearer anonymous-1' }),
       expect.any(String),
     )
   })
@@ -180,6 +189,23 @@ describe('resolveOciImage', () => {
       new Response('', { status: 403 })
     await expect(resolveOciImage('ghcr.io/o/wsl:tag', 'x64')).rejects.toThrow(
       /only pull public images/,
+    )
+  })
+
+  it.each([
+    [404, {}, /returned 404. Check the image name and tag/],
+    [429, { 'Retry-After': '60' }, /returned 429. The registry is limiting pulls, for 60 seconds/],
+  ])('explains a %d', async (status, headers, message) => {
+    responses['https://ghcr.io/v2/o/wsl/manifests/tag'] = () =>
+      new Response('', { status, headers })
+    await expect(resolveOciImage('ghcr.io/o/wsl:tag', 'x64')).rejects.toThrow(message)
+  })
+
+  it("fails clearly on a response that isn't JSON", async () => {
+    responses['https://ghcr.io/v2/o/wsl/manifests/tag'] = () =>
+      new Response('<html>', { headers: { 'Content-Type': 'text/html' } })
+    await expect(resolveOciImage('ghcr.io/o/wsl:tag', 'x64')).rejects.toThrow(
+      /didn't return an OCI manifest, but text\/html/,
     )
   })
 })

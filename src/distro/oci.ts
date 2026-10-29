@@ -13,6 +13,10 @@ export interface OciReference {
   digest?: string
 }
 
+/** A repository name, by the OCI distribution spec's grammar. */
+const COMPONENT = '[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*'
+const REPOSITORY = new RegExp(`^${COMPONENT}(?:/${COMPONENT})*$`)
+
 const MANIFEST_TYPES = [
   'application/vnd.oci.image.index.v1+json',
   'application/vnd.oci.image.manifest.v1+json',
@@ -52,16 +56,14 @@ export function parseOciReference(input: string): OciReference {
   const slash = rest.indexOf('/')
   const first = slash === -1 ? '' : rest.slice(0, slash)
   const hasRegistry = first.includes('.') || first.includes(':') || first === 'localhost'
-  let registry = hasRegistry ? first : 'docker.io'
+  // docker pull treats the legacy host as Docker Hub too.
+  let registry = !hasRegistry || first === 'index.docker.io' ? 'docker.io' : first
   let path = hasRegistry ? rest.slice(slash + 1) : rest
   const colon = path.lastIndexOf(':')
   const tag = colon === -1 ? undefined : path.slice(colon + 1)
   path = colon === -1 ? path : path.slice(0, colon)
   const validTag = tag === undefined || /^\w[\w.-]{0,127}$/.test(tag)
-  if (
-    !validTag ||
-    !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$/.test(path)
-  ) {
+  if (!validTag || !REPOSITORY.test(path)) {
     throw new Error(`image ${input} isn't an OCI reference such as oci://ghcr.io/owner/image:tag.`)
   }
   if (registry === 'docker.io') {
@@ -107,7 +109,7 @@ export async function resolveOciImage(input: string, arch: string): Promise<Dist
     url: `https://${ref.registry}/v2/${ref.repository}/blobs/${layer.digest}`,
     sha256,
     fileName: layerFileName(layer, ref.repository),
-    headers: registry.headers(),
+    authorize: () => registry.authorization(),
   }
 }
 
@@ -139,11 +141,25 @@ export function layerFileName(layer: Descriptor, repository: string): string {
 /** A registry's API for one repository, signing in anonymously when the registry asks. */
 class Registry {
   private token?: string
+  private challenge?: string
 
   constructor(private readonly ref: OciReference) {}
 
   headers(): Record<string, string> {
     return this.token ? { Authorization: `Bearer ${this.token}` } : {}
+  }
+
+  /**
+   * The Authorization header for downloading a blob, with a new token when the registry wanted
+   * one. Tokens can last as little as 5 minutes, such as Docker Hub's, so this runs just before
+   * the download rather than reusing the manifest's token.
+   */
+  async authorization(): Promise<string | undefined> {
+    if (!this.challenge) {
+      return undefined
+    }
+    this.token = await this.signIn(this.challenge)
+    return `Bearer ${this.token}`
   }
 
   /** Fetches a manifest, and checks it against a digest when one is given. */
@@ -153,13 +169,12 @@ class Registry {
     const accept = { Accept: MANIFEST_TYPES.join(', ') }
     let response = await get(url, { ...accept, ...this.headers() }, what)
     if (response.status === 401 && !this.token) {
-      this.token = await this.signIn(response.headers.get('www-authenticate') ?? '')
+      this.challenge = response.headers.get('www-authenticate') ?? ''
+      this.token = await this.signIn(this.challenge)
       response = await get(url, { ...accept, ...this.headers() }, what)
     }
     if (!response.ok) {
-      throw new Error(
-        `Couldn't fetch ${url}: it returned ${response.status}. The action can only pull public images.`,
-      )
+      throw new Error(`Couldn't fetch ${url}: it returned ${response.status}.${explain(response)}`)
     }
     const body = Buffer.from(await response.arrayBuffer())
     if (digest) {
@@ -168,7 +183,12 @@ class Registry {
         throw new Error(`The manifest for ${reference} has digest ${actual}, not ${digest}.`)
       }
     }
-    return JSON.parse(body.toString('utf8')) as OciManifest
+    try {
+      return JSON.parse(body.toString('utf8')) as OciManifest
+    } catch {
+      const type = response.headers.get('content-type') ?? 'no content type'
+      throw new Error(`${url} didn't return an OCI manifest, but ${type}.`)
+    }
   }
 
   /** Gets an anonymous pull token from the realm a registry's Bearer challenge names. */
@@ -196,5 +216,22 @@ class Registry {
       )
     }
     return token
+  }
+}
+
+/** Why a registry refused a manifest request, for the error. */
+function explain(response: Response): string {
+  switch (response.status) {
+    case 401:
+    case 403:
+      return ' The action can only pull public images.'
+    case 404:
+      return ' Check the image name and tag.'
+    case 429: {
+      const after = response.headers.get('retry-after')
+      return ` The registry is limiting pulls${after ? `, for ${after} seconds` : ''}.`
+    }
+    default:
+      return ''
   }
 }
