@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest'
-import { clean, parseErrorCode, parseVersion } from '../../src/wsl/exe.js'
+import { getExecOutput } from '@actions/exec'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clean, parseErrorCode, parseVersion, wsl } from '../../src/wsl/exe.js'
+
+vi.mock('@actions/exec')
 
 // Captured from `wsl --version` on windows-2025 (observed).
 const VERSION_OUTPUT = `WSL version: 3.0.3.0
@@ -56,5 +59,23 @@ Error code: Wsl/InstallDistro/Service/RegisterDistro/CreateVm/HCS/HCS_E_HYPERV_N
 describe('clean', () => {
   it('removes NULs and carriage returns', () => {
     expect(clean('a\0b\r\n')).toBe('ab\n')
+  })
+})
+
+describe('wsl', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it('quotes the path, which has a space, and closes stdin', async () => {
+    vi.stubEnv('ProgramFiles', 'C:\\Program Files')
+    vi.mocked(getExecOutput).mockResolvedValue({ exitCode: 0, stdout: 'ok\r\n', stderr: '' })
+    const result = await wsl(['--version'])
+    const [command, args, options] = vi.mocked(getExecOutput).mock.calls[0] ?? []
+    expect(command).toMatch(/^"C:\\Program Files[\\/]WSL[\\/]wsl\.exe"$/)
+    expect(args).toEqual(['--version'])
+    expect(options?.input).toEqual(Buffer.alloc(0))
+    expect(options?.env?.WSL_UTF8).toBe('1')
+    expect(result).toEqual({ exitCode: 0, stdout: 'ok\n' })
   })
 })

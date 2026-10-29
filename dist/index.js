@@ -34125,9 +34125,12 @@ function wslcPath() {
  * Runs the WSL package's wsl.exe. It runs by absolute path, because a bare `wsl` can resolve to
  * the inbox stub or a WindowsApps alias. stdin is closed so a prompt can't block, and WSL_UTF8
  * makes wsl.exe write UTF-8 rather than UTF-16LE.
+ *
+ * The path is quoted because @actions/exec splits its first argument on spaces, and the path is
+ * under `C:\Program Files`.
  */
 async function wsl(args, options = {}) {
-    const result = await getExecOutput((0,external_node_path_namespaceObject.join)(packageDir(), 'wsl.exe'), args, {
+    const result = await getExecOutput(`"${(0,external_node_path_namespaceObject.join)(packageDir(), 'wsl.exe')}"`, args, {
         env: { ...process.env, WSL_UTF8: '1' },
         input: Buffer.alloc(0),
         ignoreReturnCode: true,
