@@ -278,6 +278,79 @@ jobs:
           INSTANCE: ${{ steps.wsl.outputs.instance-name }}
         run: ./.github/scripts/check-cloud-init.ps1 -Instance $env:INSTANCE
 
+  image:
+    name: image from ${{ matrix.case }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      ALPINE_URL: https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64/alpine-minirootfs-3.22.7-x86_64.tar.gz
+      ALPINE_SHA256: 57e364a241bab0699cd8a760c0fd7b270e9cbcbd3cee822cb2b07ca6d925c16c
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case: a URL
+            os: windows-2025
+            image: url
+            wsl-version: 2
+          - case: a file
+            os: windows-2025
+            image: file
+            wsl-version: 2
+          - case: an OCI image
+            os: windows-2025
+            image: oci://alpine:3.22
+            wsl-version: 2
+          # The image index has an arm64 image, which WSL 1 runs there.
+          - case: an OCI image
+            os: windows-11-arm
+            image: oci://alpine:3.22
+            wsl-version: 1
+          - case: a URL with the wrong SHA-256
+            os: windows-2025
+            image: url
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+            wsl-version: 2
+            expect: failure
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download an image to the workspace
+        if: matrix.image == 'file'
+        shell: pwsh
+        run: Invoke-WebRequest -Uri $env:ALPINE_URL -OutFile alpine.tar.gz
+
+      - name: Set up WSL
+        id: wsl
+        uses: ./
+        continue-on-error: ${{ matrix.expect == 'failure' }}
+        with:
+          image: ${{ matrix.image == 'url' && env.ALPINE_URL || matrix.image == 'file' && 'alpine.tar.gz' || matrix.image }}
+          image-sha256: ${{ matrix.sha256 || (matrix.image == 'url' || matrix.image == 'file') && env.ALPINE_SHA256 || '' }}
+          instance-name: alpine
+          wsl-version: ${{ matrix.wsl-version }}
+
+      - name: Check the step failed
+        if: matrix.expect == 'failure'
+        shell: pwsh
+        env:
+          OUTCOME: ${{ steps.wsl.outcome }}
+        run: |
+          if ($env:OUTCOME -ne 'failure') { Write-Output "::error::The step should fail, but its outcome was $env:OUTCOME."; exit 1 }
+
+      - name: Check the instance
+        if: matrix.expect != 'failure'
+        shell: pwsh
+        env:
+          WANT: ${{ matrix.wsl-version }}
+        run: |
+          ./.github/scripts/check-instance.ps1 -Instance alpine -WslVersion $env:WANT
+          & (Join-Path $env:ProgramFiles 'WSL\wsl.exe') -d alpine -- cat /etc/alpine-release
+          if ($LASTEXITCODE -ne 0) { Write-Output "::error::alpine has no /etc/alpine-release."; exit 1 }
+
   wslconfig:
     name: wslconfig ${{ matrix.case }}
     runs-on: windows-2025

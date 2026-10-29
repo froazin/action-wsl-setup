@@ -15,7 +15,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 | `action.yml` | The action's metadata: name, inputs, outputs and the `node24` entry point |
 | `src/` | The TypeScript source. `index.ts` is the entry point ncc bundles, for both the main and the post step, and `main.ts` holds `run()` and `post()` |
 | `src/wsl/` | Running `wsl.exe`, finding and installing the WSL package, and `.wslconfig`. Before you change the package code, read [docs/wsl-package.md](docs/wsl-package.md). Before you change `config.ts`, read [docs/wslconfig.md](docs/wslconfig.md) |
-| `src/distro/` | Finding, downloading, caching and installing distribution images. Before you change it, read [docs/distributions.md](docs/distributions.md) |
+| `src/distro/` | Finding, downloading, caching and installing distribution images, and images from a URL, an OCI registry or a file. Before you change it, read [docs/distributions.md](docs/distributions.md). Before you change `source.ts` or `oci.ts`, read [docs/images.md](docs/images.md) too |
 | `src/cloudinit/` | Placing cloud-init seed files, waiting for cloud-init and judging the result. Before you change it, read [docs/cloud-init.md](docs/cloud-init.md) |
 | `src/http.ts`, `src/hash.ts`, `src/files.ts` | Shared helpers: fetching with retries, a file's SHA-256, and resolving a path input against the workspace |
 | `tests/` | Vitest unit tests, one `<module>.test.ts` per module in `src/` |

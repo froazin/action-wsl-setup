@@ -29,6 +29,8 @@ export interface DistroImage {
   url: string
   sha256: string
   fileName: string
+  /** Headers the download needs, such as a registry's pull token. */
+  headers?: Record<string, string>
 }
 
 /** Downloads Microsoft's distribution manifest. */

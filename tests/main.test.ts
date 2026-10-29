@@ -5,6 +5,7 @@ import { placeSeed, removeSavedSeed } from '../src/cloudinit/seed.js'
 import { downloadImage } from '../src/distro/download.js'
 import { installImage, listInstances } from '../src/distro/install.js'
 import { fetchManifest } from '../src/distro/manifest.js'
+import { resolveOciImage } from '../src/distro/oci.js'
 import { post, run } from '../src/main.js'
 import { applyWslConfig, checkWslConfig } from '../src/wsl/config.js'
 import { nativeArch, wslcPath } from '../src/wsl/exe.js'
@@ -19,6 +20,7 @@ vi.mock('../src/wsl/config.js', async (importOriginal) => ({
   checkWslConfig: vi.fn(),
 }))
 vi.mock('../src/distro/download.js')
+vi.mock('../src/distro/oci.js')
 vi.mock('../src/cloudinit/provision.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/cloudinit/provision.js')>()),
   provision: vi.fn(),
@@ -116,6 +118,70 @@ describe('run', () => {
     await run()
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/already has an instance/))
     expect(applyWslConfig).not.toHaveBeenCalled()
+  })
+
+  describe('with image', () => {
+    beforeEach(() => {
+      inputs['instance-name'] = 'mine'
+    })
+
+    it('downloads a URL and checks it against image-sha256', async () => {
+      inputs.image = 'https://example.com/images/my.wsl'
+      inputs['image-sha256'] = SHA
+      await run()
+      expect(core.setFailed).not.toHaveBeenCalled()
+      expect(fetchManifest).not.toHaveBeenCalled()
+      expect(downloadImage).toHaveBeenCalledWith(
+        {
+          name: 'https://example.com/images/my.wsl',
+          url: 'https://example.com/images/my.wsl',
+          sha256: SHA,
+          fileName: 'my.wsl',
+        },
+        true,
+      )
+      expect(installImage).toHaveBeenCalledWith('mine', 'D:\\a\\_temp\\u.wsl', 2)
+      expect(core.setOutput).toHaveBeenCalledWith('instance-name', 'mine')
+    })
+
+    it("downloads an OCI image's layer for the runner's architecture", async () => {
+      const image = {
+        name: 'ghcr.io/o/wsl:1',
+        url: 'https://ghcr.io/b',
+        sha256: SHA,
+        fileName: 'f.wsl',
+      }
+      vi.mocked(resolveOciImage).mockResolvedValue(image)
+      inputs.image = 'oci://ghcr.io/o/wsl:1'
+      await run()
+      expect(resolveOciImage).toHaveBeenCalledWith('ghcr.io/o/wsl:1', 'x64')
+      expect(downloadImage).toHaveBeenCalledWith(image, true)
+    })
+
+    it('provisions an image with cloud-init', async () => {
+      inputs.image = 'https://example.com/my.wsl'
+      inputs['image-sha256'] = SHA
+      inputs['cloud-init-user-data'] = 'user-data'
+      await run()
+      expect(provision).toHaveBeenCalledWith('mine', 15, false)
+    })
+
+    it('needs an instance name', async () => {
+      inputs['instance-name'] = ''
+      inputs.image = 'oci://ghcr.io/o/wsl:1'
+      await run()
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringMatching(/image needs instance-name/),
+      )
+      expect(ensurePackage).not.toHaveBeenCalled()
+    })
+
+    it("can't be used with distribution", async () => {
+      inputs.image = 'oci://ghcr.io/o/wsl:1'
+      inputs.distribution = 'Ubuntu-26.04'
+      await run()
+      expect(core.setFailed).toHaveBeenCalledWith('Set distribution or image, not both.')
+    })
   })
 
   it("doesn't install a distribution unless one is asked for", async () => {
