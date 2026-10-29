@@ -15,6 +15,13 @@ updates:
       include: "scope"
     cooldown:
       default-days: 7
+    ignore:
+      # ncc 0.45 can't build with TypeScript 7. See CLAUDE.md.
+      - dependency-name: "typescript"
+        versions: [">=7"]
+      # The action runs on Node.js 24, so its types stay on 24.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm:
         patterns:
