@@ -212,7 +212,7 @@ export async function provision(
 ): Promise<CloudInitStatus> {
   if (!(await hasCloudInit(instance))) {
     throw new Error(
-      `${instance} has no cloud-init, so it can't use cloud-init-user-data. Use a distribution whose image includes cloud-init.`,
+      `${instance} has no cloud-init, so it can't use cloud-init-user-data. Use a distribution or image that includes cloud-init.`,
     )
   }
   core.info(`Waiting up to ${minutes} minutes for cloud-init to finish in ${instance}.`)

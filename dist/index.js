@@ -38260,7 +38260,7 @@ async function restart(instance, allowDegraded) {
  */
 async function provision(instance, minutes, allowDegraded) {
     if (!(await hasCloudInit(instance))) {
-        throw new Error(`${instance} has no cloud-init, so it can't use cloud-init-user-data. Use a distribution whose image includes cloud-init.`);
+        throw new Error(`${instance} has no cloud-init, so it can't use cloud-init-user-data. Use a distribution or image that includes cloud-init.`);
     }
     lib_core/* info */.pq(`Waiting up to ${minutes} minutes for cloud-init to finish in ${instance}.`);
     let status;
