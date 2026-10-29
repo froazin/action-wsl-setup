@@ -17,7 +17,10 @@ interface ManifestEntry {
 
 /** The parts of DistributionInfo.json the action reads. */
 export interface Manifest {
+  /** Distributions published as `.wsl` images, which the action can install. */
   ModernDistributions?: Record<string, ManifestEntry[]>
+  /** Older distributions published as Microsoft Store packages, which it can't. */
+  Distributions?: { Name: string }[]
 }
 
 /** A distribution image to download: a `.wsl` file and its SHA-256. */
@@ -46,6 +49,12 @@ export function findImage(manifest: Manifest, name: string, arch: string): Distr
   const entry = entries.find((e) => e.Name.toLowerCase() === name.toLowerCase())
   if (!entry) {
     const names = entries.map((e) => e.Name).join(', ')
+    const legacy = manifest.Distributions?.find((d) => d.Name.toLowerCase() === name.toLowerCase())
+    if (legacy) {
+      throw new Error(
+        `${legacy.Name} is only published as a Microsoft Store package, which this action can't install. It can install: ${names}.`,
+      )
+    }
     throw new Error(`WSL has no distribution named ${name}. It has: ${names}.`)
   }
   const image = arch === 'arm64' ? entry.Arm64Url : entry.Amd64Url
@@ -64,6 +73,11 @@ export function findImage(manifest: Manifest, name: string, arch: string): Distr
 
 /** A safe file name for a download, from the last part of its URL. */
 export function fileName(url: string, fallback: string): string {
-  const last = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '')
+  let last: string
+  try {
+    last = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '')
+  } catch {
+    return `${fallback}.wsl`
+  }
   return /^[\w.-]+$/.test(last) && !/^\.+$/.test(last) ? last : `${fallback}.wsl`
 }

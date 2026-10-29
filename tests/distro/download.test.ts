@@ -11,15 +11,7 @@ import type { DistroImage } from '../../src/distro/manifest.js'
 
 vi.mock('@actions/core')
 vi.mock('@actions/tool-cache')
-vi.mock('@actions/cache', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@actions/cache')>()
-  return {
-    ReserveCacheError: actual.ReserveCacheError,
-    isFeatureAvailable: vi.fn(),
-    restoreCache: vi.fn(),
-    saveCache: vi.fn(),
-  }
-})
+vi.mock('@actions/cache')
 
 const CONTENT = Buffer.from('a distribution image')
 const IMAGE: DistroImage = {
@@ -58,10 +50,7 @@ describe('downloadImage', () => {
       cacheHit: false,
     })
     expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath)
-    expect(cache.saveCache).toHaveBeenCalledWith(
-      [dirname(expectedPath)],
-      `wsl-image-${IMAGE.sha256}`,
-    )
+    expect(cache.saveCache).toHaveBeenCalledWith([expectedPath], `wsl-image-${IMAGE.sha256}`)
   })
 
   it('restores the image from the cache', async () => {
@@ -119,22 +108,21 @@ describe('downloadImage', () => {
     expect(cache.saveCache).not.toHaveBeenCalled()
   })
 
-  it('carries on when the cache restore fails', async () => {
-    vi.mocked(cache.restoreCache).mockRejectedValue(new Error('cache service down'))
+  it('carries on when the cache has nothing, as when the restore fails', async () => {
+    vi.mocked(cache.restoreCache).mockResolvedValue(undefined)
     await expect(downloadImage(IMAGE, true)).resolves.toMatchObject({ cacheHit: false })
-    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/cache service down/))
+    expect(downloadTool).toHaveBeenCalled()
   })
 
-  it('only notes when another job is saving the same image', async () => {
-    vi.mocked(cache.saveCache).mockRejectedValue(new cache.ReserveCacheError('already reserved'))
+  it("doesn't claim to have saved the image when the cache didn't save it", async () => {
+    vi.mocked(cache.saveCache).mockResolvedValue(-1)
     await downloadImage(IMAGE, true)
-    expect(core.warning).not.toHaveBeenCalled()
-    expect(core.info).toHaveBeenCalledWith(expect.stringMatching(/already reserved/))
+    expect(core.info).not.toHaveBeenCalledWith(expect.stringMatching(/Saved .* to the cache/))
   })
 
-  it('warns when saving to the cache fails', async () => {
-    vi.mocked(cache.saveCache).mockRejectedValue(new Error('upload failed'))
+  it('says when it saved the image', async () => {
+    vi.mocked(cache.saveCache).mockResolvedValue(42)
     await downloadImage(IMAGE, true)
-    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/upload failed/))
+    expect(core.info).toHaveBeenCalledWith('Saved ubuntu.wsl to the cache.')
   })
 })

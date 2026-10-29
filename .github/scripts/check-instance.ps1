@@ -8,9 +8,11 @@ $ErrorActionPreference = 'Stop'
 $env:WSL_UTF8 = '1'
 $wsl = Join-Path $env:ProgramFiles 'WSL\wsl.exe'
 
+# Throws rather than exits: exit would end only this script, and a step that calls it twice
+# would carry on to the second call.
 function Fail([string] $Message) {
     Write-Output "::error::$Message"
-    exit 1
+    throw $Message
 }
 
 $list = & $wsl --list --verbose

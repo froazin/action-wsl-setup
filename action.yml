@@ -21,7 +21,8 @@ inputs:
   distribution:
     description: >-
       The distribution to install, by its name in "wsl --list --online", such as "Ubuntu-26.04".
-      Leave it empty to set up WSL without installing a distribution.
+      Distributions published only as Microsoft Store packages aren't supported. Leave it empty to
+      set up WSL without installing a distribution.
     required: false
     default: ""
   instance-name:

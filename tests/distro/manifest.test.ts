@@ -62,6 +62,13 @@ describe('findImage', () => {
     )
   })
 
+  it('says when a distribution is only a Store package', () => {
+    const manifest = { ...MANIFEST, Distributions: [{ Name: 'OracleLinux_9_5' }] }
+    expect(() => findImage(manifest, 'oraclelinux_9_5', 'x64')).toThrow(
+      "OracleLinux_9_5 is only published as a Microsoft Store package, which this action can't install. It can install: Ubuntu-26.04, openSUSE-Tumbleweed.",
+    )
+  })
+
   it('fails when the distribution has no image for the architecture', () => {
     expect(() => findImage(MANIFEST, 'openSUSE-Tumbleweed', 'arm64')).toThrow(/no arm64 image/)
   })
@@ -88,6 +95,8 @@ describe('fileName', () => {
     'https://example.com/a%2F..%2Fb.wsl',
     'https://example.com/',
     'https://example.com/bad name.wsl',
+    'https://example.com/a/ubuntu%E0.wsl',
+    'https://example.com/a/ubuntu%',
   ])('falls back to the distribution name for %s', (url) => {
     expect(fileName(url, 'Ubuntu-26.04')).toBe('Ubuntu-26.04.wsl')
   })

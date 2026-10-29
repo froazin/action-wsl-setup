@@ -46,7 +46,7 @@ Call the action once for each instance you need. Give each one its own `instance
 | --- | --- | --- |
 | `wsl-package-version` | Empty | The WSL package to use. Empty uses the runner's package, or installs the newest release when there's none. `latest` installs the newest release. A release such as `3.0.3` installs exactly that one, upgrading or downgrading the runner's package |
 | `token` | `${{ github.token }}` | A token for looking up WSL releases through the GitHub API, which avoids its unauthenticated rate limit |
-| `distribution` | Empty | The distribution to install, by its name in `wsl --list --online`, such as `Ubuntu-26.04` or `FedoraLinux-44`. Empty sets up WSL without installing one |
+| `distribution` | Empty | The distribution to install, by its name in `wsl --list --online`, such as `Ubuntu-26.04` or `FedoraLinux-44`. Distributions published only as Microsoft Store packages, such as `OracleLinux_9_5`, aren't supported. Empty sets up WSL without installing one |
 | `instance-name` | The distribution's name | The name to register the instance under. The job fails if an instance already has that name |
 | `wsl-version` | `2` | The instance's WSL version, `1` or `2`. The action never falls back from 2 to 1 |
 | `cache` | `true` | Keep downloaded distribution images in the Actions cache |

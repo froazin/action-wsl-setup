@@ -120,6 +120,9 @@ jobs:
   cache:
     name: Restore a cached image on windows-2025
     needs: distribution
+    # The image is cached before it's installed, so test the cache even when another
+    # distribution job failed.
+    if: ${{ !cancelled() }}
     runs-on: windows-2025
     timeout-minutes: 30
     steps:

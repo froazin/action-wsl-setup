@@ -97967,26 +97967,29 @@ async function sha256(path) {
  * Downloads a distribution image and checks its SHA-256. With the cache on, it restores the
  * image from the Actions cache when it can, and saves it there after a download. The cache key
  * is the image's SHA-256, so a new image in the manifest is never served from an old entry.
+ *
+ * The cache holds the file itself, not its directory. @actions/cache versions an entry by its
+ * paths, so an image that's renamed in the manifest gets a new entry rather than restoring a
+ * file under the old name.
+ *
+ * @actions/cache logs its own failures and doesn't throw them, apart from invalid arguments, so
+ * a cache that doesn't work only means a download.
  */
 async function downloadImage(image, useCache) {
     const dir = (0,external_node_path_namespaceObject.join)(process.env.RUNNER_TEMP ?? process.env.TEMP ?? '.', 'wsl-images', image.sha256);
     const path = (0,external_node_path_namespaceObject.join)(dir, image.fileName);
     const key = `wsl-image-${image.sha256}`;
+    const caching = useCache && isFeatureAvailable();
     // An earlier step in the job may have downloaded the same image.
     if (await matches(path, image.sha256)) {
         info(`Using ${image.fileName}, which this job already downloaded.`);
         return { path, cacheHit: false };
     }
     (0,external_node_fs_namespaceObject.rmSync)(path, { force: true });
-    if (useCache && isFeatureAvailable()) {
-        try {
-            if ((await restoreCache([dir], key)) && (await matches(path, image.sha256))) {
-                info(`Restored ${image.fileName} from the cache.`);
-                return { path, cacheHit: true };
-            }
-        }
-        catch (error) {
-            warning(`Couldn't restore ${image.fileName} from the cache: ${message(error)}`);
+    if (caching) {
+        if ((await restoreCache([path], key)) && (await matches(path, image.sha256))) {
+            info(`Restored ${image.fileName} from the cache.`);
+            return { path, cacheHit: true };
         }
         (0,external_node_fs_namespaceObject.rmSync)(path, { force: true });
     }
@@ -97998,24 +98001,15 @@ async function downloadImage(image, useCache) {
         throw new Error(`${image.fileName} has SHA-256 ${actual}, but the manifest lists ${image.sha256}.`);
     }
     info(`${image.fileName} matches its SHA-256 in the manifest.`);
-    if (useCache && isFeatureAvailable()) {
-        try {
-            await cache_saveCache([dir], key);
-            info(`Saved ${image.fileName} to the cache.`);
-        }
-        catch (error) {
-            // Another job saving the same image at the same time isn't a problem.
-            const log = error instanceof ReserveCacheError ? info : warning;
-            log(`Didn't save ${image.fileName} to the cache: ${message(error)}`);
-        }
+    // saveCache returns -1 when it didn't save, such as when another job is saving the same key,
+    // and it has already logged why.
+    if (caching && (await cache_saveCache([path], key)) !== -1) {
+        info(`Saved ${image.fileName} to the cache.`);
     }
     return { path, cacheHit: false };
 }
 async function matches(path, expected) {
     return (0,external_node_fs_namespaceObject.existsSync)(path) && (await sha256(path)) === expected;
-}
-function message(error) {
-    return error instanceof Error ? error.message : String(error);
 }
 
 ;// CONCATENATED MODULE: ./src/wsl/exe.ts
@@ -98221,6 +98215,10 @@ function findImage(manifest, name, arch) {
     const entry = entries.find((e) => e.Name.toLowerCase() === name.toLowerCase());
     if (!entry) {
         const names = entries.map((e) => e.Name).join(', ');
+        const legacy = manifest.Distributions?.find((d) => d.Name.toLowerCase() === name.toLowerCase());
+        if (legacy) {
+            throw new Error(`${legacy.Name} is only published as a Microsoft Store package, which this action can't install. It can install: ${names}.`);
+        }
         throw new Error(`WSL has no distribution named ${name}. It has: ${names}.`);
     }
     const image = arch === 'arm64' ? entry.Arm64Url : entry.Amd64Url;
@@ -98236,7 +98234,13 @@ function findImage(manifest, name, arch) {
 }
 /** A safe file name for a download, from the last part of its URL. */
 function fileName(url, fallback) {
-    const last = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '');
+    let last;
+    try {
+        last = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? '');
+    }
+    catch {
+        return `${fallback}.wsl`;
+    }
     return /^[\w.-]+$/.test(last) && !/^\.+$/.test(last) ? last : `${fallback}.wsl`;
 }
 

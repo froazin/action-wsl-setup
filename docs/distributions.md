@@ -15,7 +15,7 @@ How the action downloads a distribution image and installs it as a WSL instance.
 
 ## Overview
 
-When the `distribution` input names a distribution, the action installs it after [the WSL package](wsl-package.md) is ready. It reads Microsoft's [`DistributionInfo.json`](https://raw.githubusercontent.com/microsoft/WSL/master/distributions/DistributionInfo.json), the list `wsl --list --online` shows, downloads the `.wsl` image itself and installs it with `wsl --install --from-file`.
+When the `distribution` input names a distribution, the action installs it after [the WSL package](wsl-package.md) is ready. It reads Microsoft's [`DistributionInfo.json`](https://raw.githubusercontent.com/microsoft/WSL/master/distributions/DistributionInfo.json), the list `wsl --list --online` shows, downloads the `.wsl` image itself and installs it with `wsl --install --from-file`. Only the manifest's `ModernDistributions`, which are `.wsl` images, can be installed. Its older `Distributions` are Microsoft Store packages, such as `OracleLinux_9_5`, and the action says so when one is asked for.
 
 This sequence diagram shows one install:
 
@@ -53,7 +53,7 @@ sequenceDiagram
 - **Inputs first:** `run` parses `wsl-version` and checks `instance-name` before it changes anything on the runner, so a typo fails in seconds.
 - **Existing instances:** `listInstances` parses `wsl --list --verbose`. The action refuses to install over an instance with the same name, compared without regard to case, as WSL does.
 - **Finding the image:** `findImage` looks through every group in `ModernDistributions` for the name, without regard to case. It picks `Amd64Url` or `Arm64Url` for the architecture `nativeArch` reports. Some entries give the hash in upper case or with a `0x` prefix, so it normalises them.
-- **Downloading:** `downloadImage` keeps images in `RUNNER_TEMP\wsl-images\<sha256>\`. It reuses a file there when its hash matches, because an earlier step in the job may have downloaded it. Otherwise it tries the Actions cache, under the key `wsl-image-<sha256>`, and then downloads. A downloaded image must match the manifest's hash before it's used or cached.
+- **Downloading:** `downloadImage` keeps images in `RUNNER_TEMP\wsl-images\<sha256>\`. It reuses a file there when its hash matches, because an earlier step in the job may have downloaded it. Otherwise it tries the Actions cache, under the key `wsl-image-<sha256>`, and then downloads. A downloaded image must match the manifest's hash before it's used or cached. The cache holds the file, not its directory: `@actions/cache` versions an entry by its paths, so an image renamed in the manifest gets a new entry instead of restoring a file under the old name.
 - **Installing:** `installImage` runs `wsl --install --from-file <path> --name <instance> --version <1|2> --no-launch`. `--no-launch` registers the instance without starting it, so a later step decides what runs first. The action then checks `wsl --list --verbose` shows the instance with the requested version.
 
 ## Interfaces
@@ -68,7 +68,7 @@ sequenceDiagram
 - A distribution the manifest doesn't have fails with the list of names it does have.
 - When `wsl --install` fails with WSL 2, an error code that means the runner can't run WSL 2's virtual machine, such as `HCS_E_HYPERV_NOT_INSTALLED`, becomes a message that says to set `wsl-version` to `1`. The `windows-11-arm` runners fail this way (observed).
 - Other install failures name the WSL error code, and `wsl.exe`'s own output is in the log above them.
-- A cache that can't be read or written is a warning, not a failure. Another job saving the same key at the same time is only a note.
+- `@actions/cache` logs its own failures and doesn't throw them, so a cache that can't be read or written only means a download. `saveCache` returns `-1` when it didn't save, such as when another job is saving the same key, and the action only says it saved the image when it did.
 
 ## Security
 
@@ -85,7 +85,7 @@ sequenceDiagram
 
 ## Limits
 
-- Only distributions in Microsoft's manifest can be installed so far.
+- Only the `.wsl` distributions in Microsoft's manifest can be installed so far, not its Microsoft Store packages.
 - The instance is registered but never started, so nothing has run inside it yet, including the distribution's first-run setup.
 - On self-hosted runners, instances stay registered after the job. A second run with the same `instance-name` fails until the instance is removed.
 - The Actions cache is limited to 10 GB a repository, and an image is 150 to 450 MB.
