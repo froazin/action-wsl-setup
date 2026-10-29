@@ -78,7 +78,7 @@ flowchart TD
 
 ## Limits
 
-- A distribution's image must include cloud-init, so FedoraLinux-44 can't be provisioned yet.
+- The image must include cloud-init. The action never installs it, so an image without it, such as FedoraLinux-44's or Alpine's, can't be provisioned.
 - A step-level timeout doesn't fire if WSL freezes the runner, so workflows still need a job-level `timeout-minutes`.
 - The action can't tell whether systemd is enabled until the instance restarts, so an instance without systemd passes the systemd check.
 

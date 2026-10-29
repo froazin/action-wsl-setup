@@ -86,9 +86,6 @@ jobs:
           - os: windows-2025
             distribution: Ubuntu-26.04
             wsl-version: 2
-          - os: windows-2025
-            distribution: FedoraLinux-44
-            wsl-version: 2
           - os: windows-2022
             distribution: Ubuntu-26.04
             wsl-version: 2
@@ -218,10 +215,11 @@ jobs:
             user-data: degraded.user-data
             allow-degraded: true
             expect: degraded
-          # FedoraLinux-44's image has no cloud-init.
+          # Alpine's image has no cloud-init, so user-data fails rather than being ignored.
           - case: without cloud-init
             os: windows-2025
-            distribution: FedoraLinux-44
+            image: oci://alpine:3.22
+            instance-name: alpine
             user-data: ok.user-data
             expect: failure
           - case: on WSL 1
@@ -250,6 +248,8 @@ jobs:
         timeout-minutes: ${{ matrix.step-timeout || 25 }}
         with:
           distribution: ${{ matrix.distribution }}
+          image: ${{ matrix.image }}
+          instance-name: ${{ matrix.instance-name }}
           wsl-version: ${{ matrix.wsl-version || 2 }}
           cloud-init-user-data: .github/fixtures/cloud-init/${{ matrix.user-data }}
           allow-degraded: ${{ matrix.allow-degraded || false }}
