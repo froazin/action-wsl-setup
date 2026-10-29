@@ -18,6 +18,26 @@ inputs:
       unauthenticated rate limit.
     required: false
     default: ${{ github.token }}
+  distribution:
+    description: >-
+      The distribution to install, by its name in "wsl --list --online", such as "Ubuntu-26.04".
+      Leave it empty to set up WSL without installing a distribution.
+    required: false
+    default: ""
+  instance-name:
+    description: The name to register the instance under. Defaults to the distribution's name.
+    required: false
+    default: ""
+  wsl-version:
+    description: >-
+      The instance's WSL version, 1 or 2. WSL 2 needs virtualisation, which some runners, such as
+      windows-11-arm, don't have, so set 1 there.
+    required: false
+    default: "2"
+  cache:
+    description: Keep downloaded distribution images in the Actions cache, "true" or "false".
+    required: false
+    default: "true"
 outputs:
   wsl-package-version:
     description: The installed WSL package version, such as "3.0.3.0".
@@ -25,6 +45,10 @@ outputs:
     description: The WSL kernel version, such as "6.18.54.1-1".
   wslc-path:
     description: The path to wslc.exe, WSL's container CLI, or empty when the package doesn't have one.
+  instance-name:
+    description: The name of the installed instance, or empty when no distribution was asked for.
+  cache-hit:
+    description: '"true" when the distribution image came from the Actions cache, otherwise "false".'
 runs:
   using: node24
   main: dist/index.js
