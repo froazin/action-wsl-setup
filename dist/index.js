@@ -38372,6 +38372,8 @@ function removeFiles(paths) {
     }
 }
 
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(7598);
 // EXTERNAL MODULE: external "path"
 var external_path_ = __nccwpck_require__(6928);
 // EXTERNAL MODULE: external "fs"
@@ -45859,8 +45861,6 @@ function policies_userAgentPolicy_userAgentPolicy(options = {}) {
     };
 }
 //# sourceMappingURL=userAgentPolicy.js.map
-// EXTERNAL MODULE: external "node:crypto"
-var external_node_crypto_ = __nccwpck_require__(7598);
 ;// CONCATENATED MODULE: ./node_modules/@typespec/ts-http-runtime/dist/esm/util/sha256.js
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
@@ -95426,6 +95426,7 @@ async function sha256(path) {
 
 
 
+
 /**
  * Downloads a distribution image and checks its SHA-256. With the cache on, it restores the
  * image from the Actions cache when it can, and saves it there after a download. The cache key
@@ -95439,18 +95440,22 @@ async function sha256(path) {
  * a cache that doesn't work only means a download.
  */
 async function downloadImage(image, useCache) {
-    const dir = (0,external_node_path_namespaceObject.join)(process.env.RUNNER_TEMP ?? process.env.TEMP ?? '.', 'wsl-images', image.sha256);
+    const expected = image.sha256;
+    if (!expected) {
+        return downloadUnchecked(image);
+    }
+    const dir = (0,external_node_path_namespaceObject.join)(imagesDir(), expected);
     const path = (0,external_node_path_namespaceObject.join)(dir, image.fileName);
-    const key = `wsl-image-${image.sha256}`;
+    const key = `wsl-image-${expected}`;
     const caching = useCache && isFeatureAvailable();
     // An earlier step in the job may have downloaded the same image.
-    if (await matches(path, image.sha256)) {
+    if (await matches(path, expected)) {
         lib_core/* info */.pq(`Using ${image.fileName}, which this job already downloaded.`);
         return { path, cacheHit: false };
     }
     (0,external_node_fs_namespaceObject.rmSync)(path, { force: true });
     if (caching) {
-        if ((await restoreCache([path], key)) && (await matches(path, image.sha256))) {
+        if ((await restoreCache([path], key)) && (await matches(path, expected))) {
             lib_core/* info */.pq(`Restored ${image.fileName} from the cache.`);
             return { path, cacheHit: true };
         }
@@ -95461,9 +95466,9 @@ async function downloadImage(image, useCache) {
     // redirect to storage on another host, because @actions/http-client deletes it from the object.
     await downloadTool(image.url, path, await image.authorize?.());
     const actual = await sha256(path);
-    if (actual !== image.sha256) {
+    if (actual !== expected) {
         (0,external_node_fs_namespaceObject.rmSync)(path, { force: true });
-        throw new Error(`${image.fileName} has SHA-256 ${actual}, not ${image.sha256}.`);
+        throw new Error(`${image.fileName} has SHA-256 ${actual}, not ${expected}.`);
     }
     lib_core/* info */.pq(`${image.fileName} matches its SHA-256.`);
     // saveCache returns -1 when it didn't save, such as when another job is saving the same key,
@@ -95472,6 +95477,21 @@ async function downloadImage(image, useCache) {
         lib_core/* info */.pq(`Saved ${image.fileName} to the cache.`);
     }
     return { path, cacheHit: false };
+}
+/**
+ * Downloads an image there's no SHA-256 for, which only an image from a URL without image-sha256
+ * can be. Nothing can check it, and the cache is keyed by SHA-256, so it's downloaded each time
+ * into a new directory and never cached. It warns, and logs the SHA-256 to pin it with.
+ */
+async function downloadUnchecked(image) {
+    const path = (0,external_node_path_namespaceObject.join)(imagesDir(), 'unchecked', (0,external_node_crypto_.randomUUID)(), image.fileName);
+    lib_core/* info */.pq(`Downloading ${image.url}`);
+    await downloadTool(image.url, path, await image.authorize?.());
+    lib_core/* warning */.$e(`${image.fileName} wasn't checked against a SHA-256, because image-sha256 is empty, and it isn't cached. Its SHA-256 is ${await sha256(path)}: set image-sha256 to that to check it and cache it.`);
+    return { path, cacheHit: false };
+}
+function imagesDir() {
+    return (0,external_node_path_namespaceObject.join)(process.env.RUNNER_TEMP ?? process.env.TEMP ?? '.', 'wsl-images');
 }
 /**
  * Uses an image file that's already on the runner, such as one an earlier step built. With a
@@ -95840,9 +95860,10 @@ function explain(response) {
 
 
 /**
- * Parses the `image` and `image-sha256` inputs. An `https://` URL needs a SHA-256, because
- * nothing else says what the download should be. An `oci://` reference is checked against the
- * digests its registry lists. Anything else is a path to a file, relative to the workspace.
+ * Parses the `image` and `image-sha256` inputs. An `https://` URL or a file is checked against
+ * the SHA-256 when one is given, and used unchecked when not. An `oci://` reference is checked
+ * against the digests its registry lists. Anything else is a path to a file, relative to the
+ * workspace.
  */
 function parseImageSource(input, sha256Input) {
     const value = input.trim();
@@ -95857,9 +95878,6 @@ function parseImageSource(input, sha256Input) {
         throw new Error(`image must use https, not ${value}.`);
     }
     if (/^https:\/\//i.test(value)) {
-        if (!sha256) {
-            throw new Error('image is a URL, so it needs image-sha256, the SHA-256 of the file it downloads.');
-        }
         return { kind: 'url', url: value, sha256 };
     }
     if (/^oci:\/\//i.test(value)) {

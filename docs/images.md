@@ -19,7 +19,7 @@ The `image` input replaces `distribution` when the image comes from somewhere el
 
 | Kind | Input | Becomes |
 | --- | --- | --- |
-| URL | `https://...` with `image-sha256` | A `DistroImage` with that URL and SHA-256, for `downloadImage` |
+| URL | `https://...`, with an optional `image-sha256` | A `DistroImage` with that URL, and the SHA-256 when there is one, for `downloadImage` |
 | OCI | `oci://registry/repository:tag` or `@sha256:<digest>` | A `DistroImage` for the layer's blob, from `resolveOciImage` |
 | File | A path in the workspace, with an optional `image-sha256` | The file itself, through `useLocalImage` |
 
@@ -59,6 +59,7 @@ sequenceDiagram
 - **Architecture:** an image index lists a manifest for each platform. `resolveOciImage` picks the `linux` one whose architecture matches `nativeArch`, `amd64` for `x64` and `arm64` for `arm64`.
 - **Layer:** the image is the manifest's only layer, or the one layer whose `org.opencontainers.image.title` ends in `.wsl`, `.tar` or `.tar.gz`, as `oras push` names a file. The download is saved under that title, or as `<repository>.wsl` for a gzipped layer, because a `.wsl` file is a gzipped tar.
 - **Downloading:** the blob URL and `authorize` go to `downloadImage`, so an OCI image is cached by its layer digest like any other image, and a cache hit never asks for a token. The token goes to `downloadTool` as its `auth` argument, not in a headers object. `@actions/http-client` drops the `Authorization` header when the registry redirects to storage on another host by deleting it from the headers object, so a shared object would leave `downloadTool`'s retries without it. `auth` is set afresh on each try.
+- **Without a SHA-256:** a `DistroImage` from a URL without `image-sha256` has no `sha256`. `downloadImage` can't check it, and can't look it up in the cache, which is keyed by SHA-256, so `downloadUnchecked` downloads it into a new directory under `wsl-images\unchecked\` on every run and never caches it. It warns, and logs the file's SHA-256 so the workflow can pin it.
 - **Files:** `useLocalImage` checks a file against `image-sha256` when it's given, and installs it from where it is, without copying or caching it.
 
 ## Interfaces
@@ -68,21 +69,24 @@ sequenceDiagram
 
 ## Errors and logging
 
-- A URL without `image-sha256`, a plain `http://` URL, a malformed `oci://` reference and an `image-sha256` with an `oci://` reference fail before the runner changes.
+- A plain `http://` URL, a malformed `oci://` reference and an `image-sha256` with an `oci://` reference fail before the runner changes.
+- A URL without `image-sha256` gives a warning that it wasn't checked or cached, with its SHA-256.
 - A registry that refuses a manifest fails with its status and a reason: `401` and `403` say the action can only pull public images, `404` says to check the name and tag, and `429` says the registry is limiting pulls, with its `Retry-After`. A response that isn't JSON fails with its content type.
 - An index without a `linux` image for the runner's architecture fails, listing the architectures it has.
 - A manifest that doesn't match a pinned digest, and a download that doesn't match its SHA-256, fail and name both values.
 
 ## Security
 
-- Every downloaded image is checked against a SHA-256 before it's used or cached: the one in `image-sha256` for a URL, and the layer's digest for an OCI image.
+- An image with a SHA-256 is checked against it before it's used or cached: the one in `image-sha256` for a URL or file, and the layer's digest for an OCI image.
+- A URL or file without `image-sha256` is installed unchecked. Only HTTPS protects a URL's download then, and a server that changes the file changes what's installed. The README warns about this, and the action warns in the log every time.
 - An OCI tag can move, but the manifests are fetched over HTTPS from the registry, and the layer must match the digest the manifest lists. `@sha256:` pins the manifest itself. `get` in [`src/http.ts`](../src/http.ts) refuses a redirect from `https` to `http`, which `fetch` would otherwise follow.
 - The action never sends the workflow's `token` to a registry. It only uses the anonymous token the registry hands out.
 - A layer's title is only used as the file name when it's letters, digits, `.`, `_` and `-`.
 
 ## Decisions
 
-- **Require `image-sha256` with a URL.** A URL says nothing about what it should return, so without a hash the action would install whatever the server sends. A file on the runner is already the workflow's, so its hash is optional.
+- **`image-sha256` is optional.** The user chose this: some images, such as a nightly build, have no fixed hash to pin. Without one, the action installs what the server sends, so it warns loudly and logs the hash rather than failing.
+- **Don't cache an unchecked URL.** A cache keyed by URL would serve an old file after the server's changed, and the SHA-256 isn't known until the download has finished.
 - **An explicit `oci://` prefix.** A reference such as `ghcr.io/owner/image:tag` also looks like a relative path, so the prefix keeps the three kinds apart.
 - **Public images only, for now.** Anonymous pulls cover images published for others to use. Private images would need credentials for each registry.
 - **No `docker` or `oras` on the runner.** The registry API is a few HTTPS requests, and the Windows runners don't all have those tools.

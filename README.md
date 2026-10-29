@@ -48,11 +48,14 @@ Set `image` instead of `distribution` to install an image that isn't in Microsof
 
 `image` takes one of these:
 
-- An `https://` URL to a `.wsl` or `.tar.gz` file. Set `image-sha256` to the file's SHA-256 too, and the action fails if the download doesn't match it.
+- An `https://` URL to a `.wsl` or `.tar.gz` file. With `image-sha256`, the action fails if the download doesn't match it.
 - An `oci://` reference to a public image in a registry such as `ghcr.io` or Docker Hub. The image must have one layer, or one layer whose title ends in `.wsl`, as `oras push` gives it. The action picks the runner's architecture from a multi-architecture image, and checks the download against the registry's digest. Add `@sha256:<digest>` to pin the image.
-- A path to a file in the workspace, such as one an earlier step built. `image-sha256` is optional.
+- A path to a file in the workspace, such as one an earlier step built. With `image-sha256`, the action fails if the file doesn't match it.
 
-Downloaded images are cached by their SHA-256, as distributions are.
+> [!WARNING]
+> Without `image-sha256`, the action installs a URL or file without checking it, so a changed or tampered image goes unnoticed. A URL without `image-sha256` is also downloaded on every run, because the cache is keyed by SHA-256. For a URL, the action warns in the log and gives the image's SHA-256, so you can set `image-sha256` to it.
+
+Downloaded images with a SHA-256, including every `oci://` image, are cached by it, as distributions are.
 
 Call the action once for each instance you need. Give each one its own `instance-name` when they come from the same distribution.
 
@@ -100,7 +103,7 @@ When the action writes a `.wslconfig`, it runs `wsl --shutdown` so WSL reads it,
 | `token` | `${{ github.token }}` | A token for looking up WSL releases through the GitHub API, which avoids its unauthenticated rate limit |
 | `distribution` | Empty | The distribution to install, by its name in `wsl --list --online`, such as `Ubuntu-26.04` or `FedoraLinux-44`. Distributions published only as Microsoft Store packages, such as `OracleLinux_9_5`, aren't supported. Empty sets up WSL without installing one |
 | `image` | Empty | An image to install instead of `distribution`: an `https://` URL, an `oci://` reference to a public image, or a path in the workspace. See [Installing your own image](#installing-your-own-image) |
-| `image-sha256` | Empty | The SHA-256 the image must match. Needed with a URL, optional with a file, and not used with `oci://`, which takes `@sha256:<digest>` instead |
+| `image-sha256` | Empty | The SHA-256 a URL or file must match. Without it, the image is installed unchecked and a URL isn't cached. Not used with `oci://`, which takes `@sha256:<digest>` instead |
 | `instance-name` | The distribution's name | The name to register the instance under. Needed with `image`. The job fails if an instance already has that name |
 | `wsl-version` | `2` | The instance's WSL version, `1` or `2`. The action never falls back from 2 to 1 |
 | `cache` | `true` | Keep downloaded distribution images in the Actions cache |

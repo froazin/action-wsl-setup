@@ -14,10 +14,11 @@ vi.mock('@actions/tool-cache')
 vi.mock('@actions/cache')
 
 const CONTENT = Buffer.from('a distribution image')
+const SHA256 = createHash('sha256').update(CONTENT).digest('hex')
 const IMAGE: DistroImage = {
   name: 'Ubuntu-26.04',
   url: 'https://example.com/ubuntu.wsl',
-  sha256: createHash('sha256').update(CONTENT).digest('hex'),
+  sha256: SHA256,
   fileName: 'ubuntu.wsl',
 }
 
@@ -33,7 +34,7 @@ let expectedPath: string
 beforeEach(() => {
   temp = mkdtempSync(join(tmpdir(), 'download-'))
   vi.stubEnv('RUNNER_TEMP', temp)
-  expectedPath = join(temp, 'wsl-images', IMAGE.sha256, 'ubuntu.wsl')
+  expectedPath = join(temp, 'wsl-images', SHA256, 'ubuntu.wsl')
   vi.mocked(cache.isFeatureAvailable).mockReturnValue(true)
   vi.mocked(cache.restoreCache).mockResolvedValue(undefined)
   vi.mocked(cache.saveCache).mockResolvedValue(1)
@@ -50,13 +51,13 @@ describe('downloadImage', () => {
       cacheHit: false,
     })
     expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath, undefined)
-    expect(cache.saveCache).toHaveBeenCalledWith([expectedPath], `wsl-image-${IMAGE.sha256}`)
+    expect(cache.saveCache).toHaveBeenCalledWith([expectedPath], `wsl-image-${SHA256}`)
   })
 
   it('restores the image from the cache', async () => {
     vi.mocked(cache.restoreCache).mockImplementation(async () => {
       put(expectedPath)
-      return `wsl-image-${IMAGE.sha256}`
+      return `wsl-image-${SHA256}`
     })
     await expect(downloadImage(IMAGE, true)).resolves.toEqual({
       path: expectedPath,
@@ -148,6 +149,24 @@ describe('downloadImage with a registry token', () => {
   })
 })
 
+describe('downloadImage without a SHA-256', () => {
+  const unchecked = { ...IMAGE, sha256: undefined }
+
+  it('downloads into a new directory each time, warns and never caches', async () => {
+    const first = await downloadImage(unchecked, true)
+    const second = await downloadImage(unchecked, true)
+    expect(first.path).not.toBe(second.path)
+    expect(first.path).toMatch(/[\\/]unchecked[\\/]/)
+    expect(existsSync(first.path)).toBe(true)
+    expect(cache.restoreCache).not.toHaveBeenCalled()
+    expect(cache.saveCache).not.toHaveBeenCalled()
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining(`wasn't checked against a SHA-256`),
+    )
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining(`Its SHA-256 is ${SHA256}`))
+  })
+})
+
 describe('useLocalImage', () => {
   it('uses the file as it is without a SHA-256', async () => {
     await expect(useLocalImage('D:\\a\\my.wsl')).resolves.toEqual({
@@ -159,7 +178,7 @@ describe('useLocalImage', () => {
   it('checks the file against a SHA-256', async () => {
     const path = join(temp, 'my.wsl')
     put(path)
-    await expect(useLocalImage(path, IMAGE.sha256)).resolves.toEqual({ path, cacheHit: false })
+    await expect(useLocalImage(path, SHA256)).resolves.toEqual({ path, cacheHit: false })
     await expect(useLocalImage(path, 'f'.repeat(64))).rejects.toThrow(/not f{64}/)
   })
 })

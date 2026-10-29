@@ -23,11 +23,14 @@ export interface Manifest {
   Distributions?: { Name: string }[]
 }
 
-/** A distribution image to download: a `.wsl` file and its SHA-256. */
+/**
+ * A distribution image to download: a `.wsl` file and its SHA-256. Only an image from a URL
+ * without image-sha256 has no SHA-256.
+ */
 export interface DistroImage {
   name: string
   url: string
-  sha256: string
+  sha256?: string
   fileName: string
   /** Gets the Authorization header the download needs, such as a registry's pull token. */
   authorize?: () => Promise<string | undefined>

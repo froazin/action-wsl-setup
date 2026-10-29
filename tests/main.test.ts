@@ -144,6 +144,16 @@ describe('run', () => {
       expect(core.setOutput).toHaveBeenCalledWith('instance-name', 'mine')
     })
 
+    it('downloads a URL without image-sha256, leaving it unchecked', async () => {
+      inputs.image = 'https://example.com/images/my.wsl'
+      await run()
+      expect(core.setFailed).not.toHaveBeenCalled()
+      expect(downloadImage).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://example.com/images/my.wsl', sha256: undefined }),
+        true,
+      )
+    })
+
     it("downloads an OCI image's layer for the runner's architecture", async () => {
       const image = {
         name: 'ghcr.io/o/wsl:1',

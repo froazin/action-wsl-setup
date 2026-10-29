@@ -23,8 +23,12 @@ describe('parseImageSource', () => {
     })
   })
 
-  it('needs a SHA-256 for a URL', () => {
-    expect(() => parseImageSource('https://example.com/my.wsl', '')).toThrow(/needs image-sha256/)
+  it('reads a URL without a SHA-256', () => {
+    expect(parseImageSource('https://example.com/my.wsl', '')).toEqual({
+      kind: 'url',
+      url: 'https://example.com/my.wsl',
+      sha256: undefined,
+    })
   })
 
   it('refuses plain http', () => {
