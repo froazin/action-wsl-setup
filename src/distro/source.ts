@@ -3,14 +3,15 @@ import { parseOciReference } from './oci.js'
 
 /** Where the `image` input says to get a distribution image from. */
 export type ImageSource =
-  | { kind: 'url'; url: string; sha256: string }
+  | { kind: 'url'; url: string; sha256?: string }
   | { kind: 'oci'; reference: string }
   | { kind: 'file'; path: string; sha256?: string }
 
 /**
- * Parses the `image` and `image-sha256` inputs. An `https://` URL needs a SHA-256, because
- * nothing else says what the download should be. An `oci://` reference is checked against the
- * digests its registry lists. Anything else is a path to a file, relative to the workspace.
+ * Parses the `image` and `image-sha256` inputs. An `https://` URL or a file is checked against
+ * the SHA-256 when one is given, and used unchecked when not. An `oci://` reference is checked
+ * against the digests its registry lists. Anything else is a path to a file, relative to the
+ * workspace.
  */
 export function parseImageSource(input: string, sha256Input: string): ImageSource | undefined {
   const value = input.trim()
@@ -25,11 +26,6 @@ export function parseImageSource(input: string, sha256Input: string): ImageSourc
     throw new Error(`image must use https, not ${value}.`)
   }
   if (/^https:\/\//i.test(value)) {
-    if (!sha256) {
-      throw new Error(
-        'image is a URL, so it needs image-sha256, the SHA-256 of the file it downloads.',
-      )
-    }
     return { kind: 'url', url: value, sha256 }
   }
   if (/^oci:\/\//i.test(value)) {

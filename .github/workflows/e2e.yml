@@ -297,6 +297,11 @@ jobs:
             os: windows-2025
             image: file
             wsl-version: 2
+          - case: a URL without a SHA-256
+            os: windows-2025
+            image: url
+            unchecked: true
+            wsl-version: 2
           - case: an OCI image
             os: windows-2025
             image: oci://alpine:3.22
@@ -329,7 +334,7 @@ jobs:
         continue-on-error: ${{ matrix.expect == 'failure' }}
         with:
           image: ${{ matrix.image == 'url' && env.ALPINE_URL || matrix.image == 'file' && 'alpine.tar.gz' || matrix.image }}
-          image-sha256: ${{ matrix.sha256 || (matrix.image == 'url' || matrix.image == 'file') && env.ALPINE_SHA256 || '' }}
+          image-sha256: ${{ matrix.sha256 || !matrix.unchecked && (matrix.image == 'url' || matrix.image == 'file') && env.ALPINE_SHA256 || '' }}
           instance-name: alpine
           wsl-version: ${{ matrix.wsl-version }}
 
