@@ -14,7 +14,7 @@ How the action decides whether to write `%USERPROFILE%\.wslconfig`, and how it a
 
 ## Overview
 
-WSL reads `.wslconfig` from the user's profile when its virtual machine starts. The action sets it up after [the WSL package](wsl-package.md) is in place and before it [installs a distribution](distributions.md), so every instance it starts uses it.
+WSL reads `.wslconfig` from the user's profile when its virtual machine starts. The action decides what to do with the other input checks, before anything changes on the runner. It writes the file after [the WSL package](wsl-package.md) is in place and the distribution checks have passed, and before it [installs a distribution](distributions.md), so every instance it starts uses it.
 
 `planWslConfig` decides what to do from the `wslconfig` input, the file that's already there, the kind of runner and `wslconfig-overwrite`. This flowchart shows its decisions:
 
@@ -36,10 +36,11 @@ flowchart TD
 
 ## How it works
 
-- **Inputs first:** `parseWslConfigRequest` reads the `wslconfig` input in `run()`, before anything changes on the runner, so a missing file fails early. A path is resolved against `GITHUB_WORKSPACE` by `resolveInputPath` in [`src/files.ts`](../src/files.ts), which the cloud-init inputs use too.
-- **Planning:** `planWslConfig` is a pure function of the request, the existing content, whether the runner is hosted and `wslconfig-overwrite`, so its unit tests cover every branch.
+- **Inputs first:** `parseWslConfigRequest` reads the `wslconfig` input and `checkWslConfig` plans against the `.wslconfig` that's there, with the other input checks in `run()`. A missing file, a directory or a conflict with an existing `.wslconfig` fails before anything changes on the runner. A path is resolved against `GITHUB_WORKSPACE` by `resolveInputPath` in [`src/files.ts`](../src/files.ts), which the cloud-init inputs use too.
+- **Order:** `run()` checks the instance name is free and finds the distribution's image before `applyWslConfig`, because those checks can fail on the inputs, and a failed run shouldn't replace `.wslconfig` or stop running instances.
+- **Planning:** `planWslConfig`, which `checkWslConfig` calls, is a pure function of the request, the existing content, whether the runner is hosted and `wslconfig-overwrite`, so its unit tests cover every branch.
 - **Kind of runner:** the runner sets `RUNNER_ENVIRONMENT` to `github-hosted` on GitHub-hosted runners and `self-hosted` on others.
-- **Applying:** `applyWslConfig` writes the file, then runs `wsl --shutdown`, because WSL only reads `.wslconfig` when its virtual machine starts. It lists running instances first with `wsl --list --running --quiet`, and warns with their names when the shutdown stopped any.
+- **Applying:** `applyWslConfig` carries out the plan. It writes the file, then runs `wsl --shutdown`, because WSL only reads `.wslconfig` when its virtual machine starts. It lists running instances first with `wsl --list --running --quiet`, and warns with their names when the shutdown stopped any.
 - **Content:** the action writes the file as it's given. WSL reads LF and CRLF line endings alike (inferred), so it doesn't normalise them, and compares content exactly.
 
 ## Interfaces
@@ -49,8 +50,8 @@ flowchart TD
 
 ## Errors and logging
 
-- A path that doesn't exist fails before the runner changes, naming the input.
-- A path whose content differs from an existing `.wslconfig` fails without `wslconfig-overwrite`, naming the file and the input.
+- A path that doesn't exist or isn't a file fails before the runner changes, naming the input.
+- A path whose content differs from an existing `.wslconfig` fails without `wslconfig-overwrite`, naming the file and the input, before the runner changes.
 - A failed `wsl --shutdown` fails the step, because instances could then start with the old settings.
 - Every decision not to write is logged with its reason.
 

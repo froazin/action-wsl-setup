@@ -38280,11 +38280,15 @@ const external_node_os_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import
 ;// CONCATENATED MODULE: ./src/files.ts
 
 
-/** Resolves a path input against the workspace, failing if the file doesn't exist. */
+/** Resolves a path input against the workspace, failing unless it's a file that exists. */
 function resolveInputPath(path, input) {
     const full = (0,external_node_path_namespaceObject.isAbsolute)(path) ? path : (0,external_node_path_namespaceObject.resolve)(process.env.GITHUB_WORKSPACE ?? '.', path);
-    if (!(0,external_node_fs_namespaceObject.existsSync)(full)) {
+    const stat = (0,external_node_fs_namespaceObject.statSync)(full, { throwIfNoEntry: false });
+    if (!stat) {
         throw new Error(`${input} is ${path}, but ${full} doesn't exist.`);
+    }
+    if (!stat.isFile()) {
+        throw new Error(`${input} is ${path}, but ${full} isn't a file.`);
     }
     return full;
 }
@@ -95672,7 +95676,7 @@ function planWslConfig(request, existing, hosted, overwrite) {
     if (existing === undefined || overwrite) {
         return existing === content
             ? { write: false, reason: '.wslconfig already has this content.' }
-            : { write: true, content };
+            : { write: true, content, replacing: existing !== undefined };
     }
     if (existing === content) {
         return { write: false, reason: '.wslconfig already has this content.' };
@@ -95683,20 +95687,27 @@ function planWslConfig(request, existing, hosted, overwrite) {
     throw new Error(`${wslconfigPath()} already exists with other content, and the action won't replace it. Set wslconfig-overwrite to true to replace it.`);
 }
 /**
- * Applies the `wslconfig` input. After writing a new file it shuts WSL down, because WSL only
- * reads `.wslconfig` when its virtual machine starts. Returns whether it wrote the file.
+ * Checks the `wslconfig` input against the `.wslconfig` that's there now, and decides what to do.
+ * It runs with the other input checks, so a conflict fails before anything changes on the runner.
  */
-async function applyWslConfig(request, overwrite) {
+function checkWslConfig(request, overwrite) {
     const path = wslconfigPath();
     const existing = (0,external_node_fs_namespaceObject.existsSync)(path) ? (0,external_node_fs_namespaceObject.readFileSync)(path, 'utf8') : undefined;
     const hosted = process.env.RUNNER_ENVIRONMENT === 'github-hosted';
-    const plan = planWslConfig(request, existing, hosted, overwrite);
+    return planWslConfig(request, existing, hosted, overwrite);
+}
+/**
+ * Carries out a plan from checkWslConfig. After writing a new file it shuts WSL down, because WSL
+ * only reads `.wslconfig` when its virtual machine starts. Returns whether it wrote the file.
+ */
+async function applyWslConfig(plan) {
     if (!plan.write) {
         lib_core/* info */.pq(plan.reason);
         return false;
     }
+    const path = wslconfigPath();
     (0,external_node_fs_namespaceObject.writeFileSync)(path, plan.content);
-    lib_core/* info */.pq(`Wrote ${path}${existing === undefined ? '' : ', replacing the one that was there'}.`);
+    lib_core/* info */.pq(`Wrote ${path}${plan.replacing ? ', replacing the one that was there' : ''}.`);
     const running = await wsl(['--list', '--running', '--quiet'], { silent: true });
     // It exits non-zero when nothing is running.
     const names = running.exitCode === 0
@@ -95927,8 +95938,7 @@ async function run() {
         const useCache = lib_core/* getBooleanInput */.Vt('cache');
         const allowDegraded = lib_core/* getBooleanInput */.Vt('allow-degraded');
         const timeout = parseTimeout(lib_core/* getInput */.V4('cloud-init-timeout'));
-        const wslconfig = parseWslConfigRequest(lib_core/* getInput */.V4('wslconfig'));
-        const overwriteWslConfig = lib_core/* getBooleanInput */.Vt('wslconfig-overwrite');
+        const wslconfig = checkWslConfig(parseWslConfigRequest(lib_core/* getInput */.V4('wslconfig')), lib_core/* getBooleanInput */.Vt('wslconfig-overwrite'));
         if (distribution) {
             checkInstanceName(instanceName);
         }
@@ -95939,16 +95949,13 @@ async function run() {
         lib_core/* setOutput */.uH('wsl-package-version', version.package);
         lib_core/* setOutput */.uH('kernel-version', version.kernel);
         lib_core/* setOutput */.uH('wslc-path', wslc ?? '');
+        // These need WSL, but can still fail on the inputs, so they come before .wslconfig changes.
+        const image = distribution ? await findDistribution(distribution, instanceName) : undefined;
         // WSL reads .wslconfig when its virtual machine starts, so it goes in before any instance does.
-        await applyWslConfig(wslconfig, overwriteWslConfig);
-        if (!distribution) {
+        await applyWslConfig(wslconfig);
+        if (!image) {
             return;
         }
-        const existing = await listInstances();
-        if (existing.some((i) => i.name.toLowerCase() === instanceName.toLowerCase())) {
-            throw new Error(`The runner already has an instance named ${instanceName}. Set instance-name to another name.`);
-        }
-        const image = findImage(await fetchManifest(), distribution, await nativeArch());
         const download = await lib_core/* group */.Os(`Download ${image.name}`, () => downloadImage(image, useCache));
         // cloud-init reads the seed on the instance's first boot, so it must be in place first.
         const removeSeed = seed ? placeSeed(instanceName, seed) : undefined;
@@ -95970,6 +95977,14 @@ async function run() {
     catch (error) {
         lib_core/* setFailed */.C1(error instanceof Error ? error.message : String(error));
     }
+}
+/** Checks the instance name is free and finds the distribution's image for this runner. */
+async function findDistribution(distribution, instanceName) {
+    const existing = await listInstances();
+    if (existing.some((i) => i.name.toLowerCase() === instanceName.toLowerCase())) {
+        throw new Error(`The runner already has an instance named ${instanceName}. Set instance-name to another name.`);
+    }
+    return findImage(await fetchManifest(), distribution, await nativeArch());
 }
 /**
  * Runs after the job's steps, even when the job is cancelled or times out, and removes any seed

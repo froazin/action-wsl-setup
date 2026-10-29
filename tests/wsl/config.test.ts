@@ -5,6 +5,7 @@ import * as core from '@actions/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   applyWslConfig,
+  checkWslConfig,
   parseWslConfigRequest,
   planWslConfig,
   RUNNER_WSLCONFIG,
@@ -61,6 +62,7 @@ describe('planWslConfig', () => {
     expect(planWslConfig(fallback, undefined, true, false)).toEqual({
       write: true,
       content: RUNNER_WSLCONFIG,
+      replacing: false,
     })
   })
 
@@ -86,7 +88,11 @@ describe('planWslConfig', () => {
   })
 
   it('writes a file on any runner', () => {
-    expect(planWslConfig(file, undefined, false, false)).toEqual({ write: true, content: 'mine' })
+    expect(planWslConfig(file, undefined, false, false)).toEqual({
+      write: true,
+      content: 'mine',
+      replacing: false,
+    })
   })
 
   it("fails rather than replace someone else's .wslconfig", () => {
@@ -96,7 +102,11 @@ describe('planWslConfig', () => {
   })
 
   it('replaces it when told to', () => {
-    expect(planWslConfig(file, 'theirs', false, true)).toEqual({ write: true, content: 'mine' })
+    expect(planWslConfig(file, 'theirs', false, true)).toEqual({
+      write: true,
+      content: 'mine',
+      replacing: true,
+    })
   })
 
   it.each([false, true])("doesn't rewrite identical content (overwrite %s)", (overwrite) => {
@@ -104,9 +114,33 @@ describe('planWslConfig', () => {
   })
 })
 
-describe('applyWslConfig', () => {
-  beforeEach(() => {
+describe('checkWslConfig', () => {
+  it('plans from the .wslconfig that is there and the kind of runner', () => {
     vi.stubEnv('RUNNER_ENVIRONMENT', 'github-hosted')
+    writeFileSync(wslconfigPath(), 'theirs')
+    expect(checkWslConfig({ kind: 'default' }, true)).toEqual({
+      write: true,
+      content: RUNNER_WSLCONFIG,
+      replacing: true,
+    })
+  })
+
+  it('treats any other runner as self-hosted', () => {
+    expect(checkWslConfig({ kind: 'default' }, false)).toMatchObject({ write: false })
+  })
+
+  it("fails rather than replace someone else's .wslconfig", () => {
+    writeFileSync(wslconfigPath(), 'theirs')
+    expect(() => checkWslConfig({ kind: 'file', content: 'mine' }, false)).toThrow(
+      /wslconfig-overwrite/,
+    )
+  })
+})
+
+describe('applyWslConfig', () => {
+  const plan = { write: true, content: RUNNER_WSLCONFIG, replacing: false } as const
+
+  beforeEach(() => {
     vi.mocked(wsl).mockImplementation(async (args) =>
       args.includes('--running')
         ? { exitCode: 1, stdout: 'There are no running distributions.\n' }
@@ -115,7 +149,7 @@ describe('applyWslConfig', () => {
   })
 
   it('writes the file and shuts WSL down', async () => {
-    await expect(applyWslConfig({ kind: 'default' }, false)).resolves.toBe(true)
+    await expect(applyWslConfig(plan)).resolves.toBe(true)
     expect(readFileSync(wslconfigPath(), 'utf8')).toBe(RUNNER_WSLCONFIG)
     expect(wsl).toHaveBeenCalledWith(['--shutdown'])
     expect(core.warning).not.toHaveBeenCalled()
@@ -123,23 +157,20 @@ describe('applyWslConfig', () => {
 
   it('warns about the instances it stopped', async () => {
     vi.mocked(wsl).mockResolvedValue({ exitCode: 0, stdout: 'Ubuntu-26.04\r\nci\n' })
-    await applyWslConfig({ kind: 'default' }, false)
+    await applyWslConfig(plan)
     expect(core.warning).toHaveBeenCalledWith(
       'Stopped Ubuntu-26.04, ci so WSL reads the new .wslconfig.',
     )
   })
 
-  it("doesn't write or shut down when there's nothing to change", async () => {
-    vi.stubEnv('RUNNER_ENVIRONMENT', 'self-hosted')
-    await expect(applyWslConfig({ kind: 'default' }, false)).resolves.toBe(false)
+  it("doesn't write or shut down when the plan says not to", async () => {
+    await expect(applyWslConfig({ write: false, reason: 'none' })).resolves.toBe(false)
     expect(existsSync(wslconfigPath())).toBe(false)
     expect(wsl).not.toHaveBeenCalled()
   })
 
   it('fails when wsl --shutdown fails', async () => {
     vi.mocked(wsl).mockResolvedValue({ exitCode: 1, stdout: '' })
-    await expect(applyWslConfig({ kind: 'file', content: 'mine' }, false)).rejects.toThrow(
-      /wsl --shutdown failed/,
-    )
+    await expect(applyWslConfig(plan)).rejects.toThrow(/wsl --shutdown failed/)
   })
 })

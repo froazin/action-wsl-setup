@@ -38,7 +38,9 @@ export function wslconfigPath(): string {
 }
 
 /** What to do about `.wslconfig`: write content, or leave the file as it is. */
-export type WslConfigPlan = { write: true; content: string } | { write: false; reason: string }
+export type WslConfigPlan =
+  | { write: true; content: string; replacing: boolean }
+  | { write: false; reason: string }
 
 /**
  * Decides what to do about `.wslconfig`. The default is only written on GitHub-hosted runners,
@@ -65,7 +67,7 @@ export function planWslConfig(
   if (existing === undefined || overwrite) {
     return existing === content
       ? { write: false, reason: '.wslconfig already has this content.' }
-      : { write: true, content }
+      : { write: true, content, replacing: existing !== undefined }
   }
   if (existing === content) {
     return { write: false, reason: '.wslconfig already has this content.' }
@@ -79,23 +81,28 @@ export function planWslConfig(
 }
 
 /**
- * Applies the `wslconfig` input. After writing a new file it shuts WSL down, because WSL only
- * reads `.wslconfig` when its virtual machine starts. Returns whether it wrote the file.
+ * Checks the `wslconfig` input against the `.wslconfig` that's there now, and decides what to do.
+ * It runs with the other input checks, so a conflict fails before anything changes on the runner.
  */
-export async function applyWslConfig(
-  request: WslConfigRequest,
-  overwrite: boolean,
-): Promise<boolean> {
+export function checkWslConfig(request: WslConfigRequest, overwrite: boolean): WslConfigPlan {
   const path = wslconfigPath()
   const existing = existsSync(path) ? readFileSync(path, 'utf8') : undefined
   const hosted = process.env.RUNNER_ENVIRONMENT === 'github-hosted'
-  const plan = planWslConfig(request, existing, hosted, overwrite)
+  return planWslConfig(request, existing, hosted, overwrite)
+}
+
+/**
+ * Carries out a plan from checkWslConfig. After writing a new file it shuts WSL down, because WSL
+ * only reads `.wslconfig` when its virtual machine starts. Returns whether it wrote the file.
+ */
+export async function applyWslConfig(plan: WslConfigPlan): Promise<boolean> {
   if (!plan.write) {
     core.info(plan.reason)
     return false
   }
+  const path = wslconfigPath()
   writeFileSync(path, plan.content)
-  core.info(`Wrote ${path}${existing === undefined ? '' : ', replacing the one that was there'}.`)
+  core.info(`Wrote ${path}${plan.replacing ? ', replacing the one that was there' : ''}.`)
 
   const running = await wsl(['--list', '--running', '--quiet'], { silent: true })
   // It exits non-zero when nothing is running.

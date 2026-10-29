@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ afterEach(() => {
 describe('resolveInputPath', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'workspace-'))
   writeFileSync(join(workspace, 'file'), '')
+  mkdirSync(join(workspace, 'dir'))
 
   it('resolves a path against the workspace', () => {
     vi.stubEnv('GITHUB_WORKSPACE', workspace)
@@ -25,6 +26,13 @@ describe('resolveInputPath', () => {
     vi.stubEnv('GITHUB_WORKSPACE', workspace)
     expect(() => resolveInputPath('missing', 'wslconfig')).toThrow(
       /wslconfig is missing, but .* doesn't exist/,
+    )
+  })
+
+  it('fails when the path is a directory', () => {
+    vi.stubEnv('GITHUB_WORKSPACE', workspace)
+    expect(() => resolveInputPath('dir', 'wslconfig')).toThrow(
+      /wslconfig is dir, but .* isn't a file/,
     )
   })
 })

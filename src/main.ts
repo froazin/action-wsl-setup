@@ -14,8 +14,8 @@ import {
   listInstances,
   parseWslVersion,
 } from './distro/install.js'
-import { fetchManifest, findImage } from './distro/manifest.js'
-import { applyWslConfig, parseWslConfigRequest } from './wsl/config.js'
+import { type DistroImage, fetchManifest, findImage } from './distro/manifest.js'
+import { applyWslConfig, checkWslConfig, parseWslConfigRequest } from './wsl/config.js'
 import { nativeArch, wslcPath } from './wsl/exe.js'
 import { ensurePackage } from './wsl/package.js'
 import { parsePackageRequest } from './wsl/releases.js'
@@ -35,8 +35,10 @@ export async function run(): Promise<void> {
     const useCache = core.getBooleanInput('cache')
     const allowDegraded = core.getBooleanInput('allow-degraded')
     const timeout = parseTimeout(core.getInput('cloud-init-timeout'))
-    const wslconfig = parseWslConfigRequest(core.getInput('wslconfig'))
-    const overwriteWslConfig = core.getBooleanInput('wslconfig-overwrite')
+    const wslconfig = checkWslConfig(
+      parseWslConfigRequest(core.getInput('wslconfig')),
+      core.getBooleanInput('wslconfig-overwrite'),
+    )
     if (distribution) {
       checkInstanceName(instanceName)
     }
@@ -48,19 +50,15 @@ export async function run(): Promise<void> {
     core.setOutput('wsl-package-version', version.package)
     core.setOutput('kernel-version', version.kernel)
     core.setOutput('wslc-path', wslc ?? '')
-    // WSL reads .wslconfig when its virtual machine starts, so it goes in before any instance does.
-    await applyWslConfig(wslconfig, overwriteWslConfig)
 
-    if (!distribution) {
+    // These need WSL, but can still fail on the inputs, so they come before .wslconfig changes.
+    const image = distribution ? await findDistribution(distribution, instanceName) : undefined
+    // WSL reads .wslconfig when its virtual machine starts, so it goes in before any instance does.
+    await applyWslConfig(wslconfig)
+
+    if (!image) {
       return
     }
-    const existing = await listInstances()
-    if (existing.some((i) => i.name.toLowerCase() === instanceName.toLowerCase())) {
-      throw new Error(
-        `The runner already has an instance named ${instanceName}. Set instance-name to another name.`,
-      )
-    }
-    const image = findImage(await fetchManifest(), distribution, await nativeArch())
     const download = await core.group(`Download ${image.name}`, () =>
       downloadImage(image, useCache),
     )
@@ -84,6 +82,17 @@ export async function run(): Promise<void> {
   } catch (error) {
     core.setFailed(error instanceof Error ? error.message : String(error))
   }
+}
+
+/** Checks the instance name is free and finds the distribution's image for this runner. */
+async function findDistribution(distribution: string, instanceName: string): Promise<DistroImage> {
+  const existing = await listInstances()
+  if (existing.some((i) => i.name.toLowerCase() === instanceName.toLowerCase())) {
+    throw new Error(
+      `The runner already has an instance named ${instanceName}. Set instance-name to another name.`,
+    )
+  }
+  return findImage(await fetchManifest(), distribution, await nativeArch())
 }
 
 /**
