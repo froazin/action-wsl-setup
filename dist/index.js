@@ -37772,7 +37772,7 @@ module.exports = {
 /***/ ((module, __unused_webpack___webpack_exports__, __nccwpck_require__) => {
 
 __nccwpck_require__.a(module, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
-/* harmony import */ var _main_js__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(6703);
+/* harmony import */ var _main_js__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(5049);
 // Entry point that ncc bundles into dist/index.js.
 
 await (0,_main_js__WEBPACK_IMPORTED_MODULE_0__/* .run */ .e)();
@@ -37782,7 +37782,7 @@ __webpack_async_result__();
 
 /***/ }),
 
-/***/ 6703:
+/***/ 5049:
 /***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
 
 
@@ -40923,10 +40923,323 @@ function getIDToken(aud) {
  */
 
 //# sourceMappingURL=core.js.map
+;// CONCATENATED MODULE: external "node:child_process"
+const external_node_child_process_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:child_process");
 ;// CONCATENATED MODULE: external "node:fs"
 const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
 ;// CONCATENATED MODULE: external "node:path"
 const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+;// CONCATENATED MODULE: ./src/wsl/exe.ts
+
+
+
+
+/** Path to the WSL package's wsl.exe, which exists only once a WSL package is installed. */
+function packageDir() {
+    return (0,external_node_path_namespaceObject.join)(process.env.ProgramFiles ?? 'C:\\Program Files', 'WSL');
+}
+/** Path to the WSL package's wslc.exe, or undefined when the package doesn't have one. */
+function wslcPath() {
+    const path = (0,external_node_path_namespaceObject.join)(packageDir(), 'wslc.exe');
+    return (0,external_node_fs_namespaceObject.existsSync)(path) ? path : undefined;
+}
+/**
+ * Runs the WSL package's wsl.exe. It runs by absolute path, because a bare `wsl` can resolve to
+ * the inbox stub or a WindowsApps alias. stdin is closed so a prompt can't block, and WSL_UTF8
+ * makes wsl.exe write UTF-8 rather than UTF-16LE.
+ *
+ * The path is quoted because @actions/exec splits its first argument on spaces, and the path is
+ * under `C:\Program Files`.
+ */
+async function wsl(args, options = {}) {
+    const result = await getExecOutput(`"${(0,external_node_path_namespaceObject.join)(packageDir(), 'wsl.exe')}"`, args, {
+        env: { ...process.env, WSL_UTF8: '1' },
+        input: Buffer.alloc(0),
+        ignoreReturnCode: true,
+        silent: options.silent ?? false,
+    });
+    return { exitCode: result.exitCode, stdout: clean(result.stdout + result.stderr) };
+}
+/**
+ * Runs the WSL package's wsl.exe like `wsl()`, but kills it after `timeoutMs`. Use it for
+ * commands that can wait for a long time, such as `cloud-init status --wait`. Its output isn't
+ * shown in the log as it runs.
+ */
+function wslWithTimeout(args, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const child = (0,external_node_child_process_namespaceObject.spawn)((0,external_node_path_namespaceObject.join)(packageDir(), 'wsl.exe'), args, {
+            env: { ...process.env, WSL_UTF8: '1' },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: timeoutMs,
+            windowsHide: true,
+        });
+        const chunks = [];
+        child.stdout.on('data', (chunk) => chunks.push(chunk));
+        child.stderr.on('data', (chunk) => chunks.push(chunk));
+        child.on('error', reject);
+        child.on('close', (code, signal) => {
+            resolve({
+                exitCode: code ?? -1,
+                stdout: clean(Buffer.concat(chunks).toString('utf8')),
+                timedOut: signal !== null,
+            });
+        });
+    });
+}
+/**
+ * Returns Windows' own architecture, `x64` or `arm64`. Node's process.arch is the architecture
+ * Node was built for, which is x64 when an x64 runner runs under emulation on ARM64 Windows. The
+ * registry holds the machine's architecture whatever process reads it. Falls back to
+ * process.arch when the query fails.
+ */
+async function nativeArch() {
+    const reg = (0,external_node_path_namespaceObject.join)(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+    const key = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment';
+    try {
+        const result = await getExecOutput(`"${reg}"`, ['query', key, '/v', 'PROCESSOR_ARCHITECTURE'], {
+            ignoreReturnCode: true,
+            silent: true,
+        });
+        return parseArch(result.stdout) ?? process.arch;
+    }
+    catch {
+        return process.arch;
+    }
+}
+/** Reads PROCESSOR_ARCHITECTURE from `reg query` output as `x64` or `arm64`. */
+function parseArch(output) {
+    const value = /PROCESSOR_ARCHITECTURE\s+REG_SZ\s+(\S+)/i.exec(output)?.[1]?.toUpperCase();
+    if (value === 'AMD64')
+        return 'x64';
+    if (value === 'ARM64')
+        return 'arm64';
+    return undefined;
+}
+/** Removes the NULs and carriage returns wsl.exe can leave in its output. */
+function clean(output) {
+    return output.replace(/\0/g, '').replace(/\r/g, '');
+}
+/**
+ * Parses `wsl --version`. The labels are translated on non-English systems, so this reads the
+ * values by position: the first line is the package version and the second the kernel version.
+ */
+function parseVersion(output) {
+    const values = clean(output)
+        .split('\n')
+        .map((line) => /:\s*(\d[\w.+-]*)\s*$/.exec(line)?.[1])
+        .filter((value) => value !== undefined);
+    const [pkg, kernel] = values;
+    if (pkg === undefined || kernel === undefined || !/^\d+(\.\d+){1,3}$/.test(pkg)) {
+        return undefined;
+    }
+    return { package: pkg, kernel };
+}
+/** Returns the WSL error code in wsl.exe's output, such as `Wsl/Service/WSL_E_DISTRO_NOT_FOUND`. */
+function parseErrorCode(output) {
+    return /\bWsl\/[A-Za-z0-9_/]+/.exec(output)?.[0];
+}
+
+;// CONCATENATED MODULE: ./src/cloudinit/provision.ts
+
+
+/** Where cloud-init writes its result when its last stage finishes. */
+const RESULT = '/var/lib/cloud/data/result.json';
+/** Parses the `cloud-init-timeout` input, in minutes. Empty means 15. */
+function parseTimeout(input) {
+    const value = input.trim();
+    if (value === '')
+        return 15;
+    const minutes = Number(value);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+        throw new Error(`cloud-init-timeout must be a number of minutes above 0, not "${value}".`);
+    }
+    return minutes;
+}
+/** True when the instance has cloud-init. Running the check starts the instance. */
+async function hasCloudInit(instance) {
+    const result = await wsl([
+        '-d',
+        instance,
+        '-u',
+        'root',
+        '--',
+        'sh',
+        '-c',
+        'command -v cloud-init',
+    ]);
+    return result.exitCode === 0;
+}
+/**
+ * Waits for cloud-init to finish in the instance. One wsl.exe process waits the whole time, so
+ * a client stays attached and WSL doesn't stop the idle instance part way through.
+ */
+async function waitForCloudInit(instance, minutes) {
+    const args = ['-d', instance, '-u', 'root', '--', 'cloud-init', 'status', '--wait'];
+    const result = await wslWithTimeout(args, minutes * 60_000);
+    if (result.timedOut) {
+        throw new Error(`cloud-init didn't finish in ${instance} within ${minutes} minutes. Raise cloud-init-timeout if it needs longer.`);
+    }
+}
+/** Reads cloud-init's result.json, or undefined when cloud-init hasn't finished a run. */
+async function readResult(instance) {
+    const result = await wsl(['-d', instance, '-u', 'root', '--', 'cat', RESULT], { silent: true });
+    if (result.exitCode !== 0) {
+        return undefined;
+    }
+    try {
+        return JSON.parse(result.stdout);
+    }
+    catch {
+        return undefined;
+    }
+}
+/**
+ * Judges a cloud-init run from its result.json, rather than `cloud-init status`: some
+ * distributions turn cloud-init off after its first run, and then status says "disabled" whether
+ * or not it ran (observed on Ubuntu-26.04).
+ */
+function judge(result, allowDegraded) {
+    if (!result?.v1) {
+        throw new Error(`cloud-init didn't finish a run, so it may not have found the seed files. Its log is above.`);
+    }
+    const { datasource, errors = [], recoverable_errors: recoverable = {} } = result.v1;
+    if (!datasource?.includes('WSL')) {
+        throw new Error(`cloud-init ran with ${datasource ?? 'no datasource'}, not the WSL datasource, so it didn't use the user-data.`);
+    }
+    if (errors.length > 0) {
+        throw new Error(`cloud-init failed: ${errors.join('; ')}`);
+    }
+    const warnings = Object.entries(recoverable).flatMap(([level, messages]) => messages.map((message) => `${level}: ${message}`));
+    if (warnings.length === 0) {
+        return 'done';
+    }
+    const summary = `cloud-init finished degraded: ${warnings.join('; ')}`;
+    if (!allowDegraded) {
+        throw new Error(`${summary}. Set allow-degraded to true to accept that.`);
+    }
+    warning(summary);
+    return 'degraded';
+}
+/** Shows cloud-init's status and output log, in a collapsed group. */
+async function showLogs(instance) {
+    const script = 'cloud-init status --long; echo; tail -n 200 /var/log/cloud-init-output.log';
+    await group(`cloud-init log for ${instance}`, () => wsl(['-d', instance, '-u', 'root', '--', 'sh', '-c', script]));
+}
+/**
+ * Restarts the instance so cloud-init's changes to /etc/wsl.conf take effect, such as the default
+ * user or systemd, then checks systemd started cleanly when it's running.
+ */
+async function restart(instance, allowDegraded) {
+    await wsl(['--terminate', instance]);
+    const script = 'if [ "$(cat /proc/1/comm)" = systemd ]; then systemctl is-system-running --wait; else echo no-systemd; fi';
+    const result = await wslWithTimeout(['-d', instance, '-u', 'root', '--', 'sh', '-c', script], 300_000);
+    const state = result.stdout.trim().split('\n').at(-1) ?? '';
+    info(`After a restart, ${instance}'s systemd state is ${state || 'unknown'}.`);
+    if (state === 'running' || state === 'no-systemd') {
+        return;
+    }
+    const failed = await wsl([
+        '-d',
+        instance,
+        '-u',
+        'root',
+        '--',
+        'systemctl',
+        '--failed',
+        '--no-pager',
+    ]);
+    const summary = `systemd is ${state || 'not running'} in ${instance} after cloud-init`;
+    if (state !== 'degraded' || !allowDegraded) {
+        throw new Error(state === 'degraded'
+            ? `${summary}, because of the failed units above. Set allow-degraded to true to accept that.`
+            : `${summary}. ${failed.stdout.trim()}`);
+    }
+    warning(`${summary}, because of the failed units above.`);
+}
+/**
+ * Provisions a newly installed instance with the seed placed for it: starts it, waits for
+ * cloud-init, judges the run and restarts the instance. cloud-init's log is shown whether it
+ * worked or not.
+ */
+async function provision(instance, minutes, allowDegraded) {
+    if (!(await hasCloudInit(instance))) {
+        throw new Error(`${instance} has no cloud-init, so it can't use cloud-init-user-data. Use a distribution whose image includes cloud-init.`);
+    }
+    info(`Waiting up to ${minutes} minutes for cloud-init to finish in ${instance}.`);
+    let status;
+    try {
+        await waitForCloudInit(instance, minutes);
+        status = judge(await readResult(instance), allowDegraded);
+    }
+    finally {
+        await showLogs(instance);
+    }
+    await restart(instance, allowDegraded);
+    return status;
+}
+
+;// CONCATENATED MODULE: external "node:os"
+const external_node_os_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:os");
+;// CONCATENATED MODULE: ./src/cloudinit/seed.ts
+
+
+
+
+/** The directory cloud-init's WSL datasource reads seed files from. */
+function seedDir() {
+    return (0,external_node_path_namespaceObject.join)(process.env.USERPROFILE ?? (0,external_node_os_namespaceObject.homedir)(), '.cloud-init');
+}
+/**
+ * Reads a seed file as cloud-init needs it: without a byte order mark and with LF line endings.
+ * A checkout on Windows can give the file CRLF line endings.
+ */
+function normalise(content) {
+    return content.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+}
+/** Resolves a path input against the workspace and reads it, failing if it doesn't exist. */
+function readInputFile(path, input) {
+    const full = (0,external_node_path_namespaceObject.isAbsolute)(path) ? path : (0,external_node_path_namespaceObject.resolve)(process.env.GITHUB_WORKSPACE ?? '.', path);
+    if (!(0,external_node_fs_namespaceObject.existsSync)(full)) {
+        throw new Error(`${input} is ${path}, but ${full} doesn't exist.`);
+    }
+    return normalise((0,external_node_fs_namespaceObject.readFileSync)(full, 'utf8'));
+}
+/**
+ * Builds the seed from the inputs. Without meta-data, the datasource still needs an instance-id,
+ * so the seed gets one named after the instance.
+ */
+function buildSeed(instance, userData, metaData) {
+    return { userData, metaData: metaData ?? `instance-id: ${instance}\n` };
+}
+/**
+ * Writes the seed files for an instance, and returns a function that removes the ones it wrote.
+ * A seed file that's already there with other content is someone else's, so it fails rather than
+ * replace it. One with the same content is left in place, and left behind afterwards.
+ */
+function placeSeed(instance, seed) {
+    const dir = seedDir();
+    const files = [
+        { path: (0,external_node_path_namespaceObject.join)(dir, `${instance}.user-data`), content: seed.userData },
+        { path: (0,external_node_path_namespaceObject.join)(dir, `${instance}.meta-data`), content: seed.metaData },
+    ];
+    for (const file of files) {
+        if ((0,external_node_fs_namespaceObject.existsSync)(file.path) && normalise((0,external_node_fs_namespaceObject.readFileSync)(file.path, 'utf8')) !== file.content) {
+            throw new Error(`${file.path} already exists with other content, and the action won't replace it. Remove it, or set instance-name to another name.`);
+        }
+    }
+    (0,external_node_fs_namespaceObject.mkdirSync)(dir, { recursive: true });
+    const written = files.filter((file) => !(0,external_node_fs_namespaceObject.existsSync)(file.path));
+    for (const file of written) {
+        (0,external_node_fs_namespaceObject.writeFileSync)(file.path, file.content);
+        info(`Wrote ${file.path}`);
+    }
+    return () => {
+        for (const file of written) {
+            (0,external_node_fs_namespaceObject.rmSync)(file.path, { force: true });
+        }
+    };
+}
+
 ;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-glob-options-helper.js
 
 /**
@@ -44711,8 +45024,6 @@ class AbortError extends Error {
     }
 }
 //# sourceMappingURL=AbortError.js.map
-;// CONCATENATED MODULE: external "node:os"
-const external_node_os_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:os");
 // EXTERNAL MODULE: external "node:util"
 var external_node_util_ = __nccwpck_require__(7975);
 ;// CONCATENATED MODULE: external "node:process"
@@ -60003,7 +60314,7 @@ function assertContext(context) {
  * @param {Rule[]|Rule[][]|RegExp} context
  * @returns {{ lists: Rule[][]|null, regex: RegExp|null }}
  */
-function normalise(context) {
+function src_normalise(context) {
   if (context instanceof RegExp) return { lists: null, regex: context };
   // Distinguish PatternList (array of rule objects) from array of PatternLists
   if (Array.isArray(context[0])) return { lists: context, regex: null };
@@ -60051,7 +60362,7 @@ function isUnsafe(value, context) {
   assertString(value);
   assertContext(context);
 
-  const { lists, regex } = normalise(context);
+  const { lists, regex } = src_normalise(context);
 
   if (regex) return regex.test(value);
 
@@ -60079,7 +60390,7 @@ function whyUnsafe(value, context) {
   assertString(value);
   assertContext(context);
 
-  const { lists, regex } = normalise(context);
+  const { lists, regex } = src_normalise(context);
 
   if (regex) {
     return regex.test(value)
@@ -60106,7 +60417,7 @@ function allUnsafe(value, context) {
   assertString(value);
   assertContext(context);
 
-  const { lists, regex } = normalise(context);
+  const { lists, regex } = src_normalise(context);
   const results = [];
 
   if (regex) {
@@ -98012,89 +98323,6 @@ async function matches(path, expected) {
     return (0,external_node_fs_namespaceObject.existsSync)(path) && (await sha256(path)) === expected;
 }
 
-;// CONCATENATED MODULE: ./src/wsl/exe.ts
-
-
-
-/** Path to the WSL package's wsl.exe, which exists only once a WSL package is installed. */
-function packageDir() {
-    return (0,external_node_path_namespaceObject.join)(process.env.ProgramFiles ?? 'C:\\Program Files', 'WSL');
-}
-/** Path to the WSL package's wslc.exe, or undefined when the package doesn't have one. */
-function wslcPath() {
-    const path = (0,external_node_path_namespaceObject.join)(packageDir(), 'wslc.exe');
-    return (0,external_node_fs_namespaceObject.existsSync)(path) ? path : undefined;
-}
-/**
- * Runs the WSL package's wsl.exe. It runs by absolute path, because a bare `wsl` can resolve to
- * the inbox stub or a WindowsApps alias. stdin is closed so a prompt can't block, and WSL_UTF8
- * makes wsl.exe write UTF-8 rather than UTF-16LE.
- *
- * The path is quoted because @actions/exec splits its first argument on spaces, and the path is
- * under `C:\Program Files`.
- */
-async function wsl(args, options = {}) {
-    const result = await getExecOutput(`"${(0,external_node_path_namespaceObject.join)(packageDir(), 'wsl.exe')}"`, args, {
-        env: { ...process.env, WSL_UTF8: '1' },
-        input: Buffer.alloc(0),
-        ignoreReturnCode: true,
-        silent: options.silent ?? false,
-    });
-    return { exitCode: result.exitCode, stdout: clean(result.stdout + result.stderr) };
-}
-/**
- * Returns Windows' own architecture, `x64` or `arm64`. Node's process.arch is the architecture
- * Node was built for, which is x64 when an x64 runner runs under emulation on ARM64 Windows. The
- * registry holds the machine's architecture whatever process reads it. Falls back to
- * process.arch when the query fails.
- */
-async function nativeArch() {
-    const reg = (0,external_node_path_namespaceObject.join)(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
-    const key = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment';
-    try {
-        const result = await getExecOutput(`"${reg}"`, ['query', key, '/v', 'PROCESSOR_ARCHITECTURE'], {
-            ignoreReturnCode: true,
-            silent: true,
-        });
-        return parseArch(result.stdout) ?? process.arch;
-    }
-    catch {
-        return process.arch;
-    }
-}
-/** Reads PROCESSOR_ARCHITECTURE from `reg query` output as `x64` or `arm64`. */
-function parseArch(output) {
-    const value = /PROCESSOR_ARCHITECTURE\s+REG_SZ\s+(\S+)/i.exec(output)?.[1]?.toUpperCase();
-    if (value === 'AMD64')
-        return 'x64';
-    if (value === 'ARM64')
-        return 'arm64';
-    return undefined;
-}
-/** Removes the NULs and carriage returns wsl.exe can leave in its output. */
-function clean(output) {
-    return output.replace(/\0/g, '').replace(/\r/g, '');
-}
-/**
- * Parses `wsl --version`. The labels are translated on non-English systems, so this reads the
- * values by position: the first line is the package version and the second the kernel version.
- */
-function parseVersion(output) {
-    const values = clean(output)
-        .split('\n')
-        .map((line) => /:\s*(\d[\w.+-]*)\s*$/.exec(line)?.[1])
-        .filter((value) => value !== undefined);
-    const [pkg, kernel] = values;
-    if (pkg === undefined || kernel === undefined || !/^\d+(\.\d+){1,3}$/.test(pkg)) {
-        return undefined;
-    }
-    return { package: pkg, kernel };
-}
-/** Returns the WSL error code in wsl.exe's output, such as `Wsl/Service/WSL_E_DISTRO_NOT_FOUND`. */
-function parseErrorCode(output) {
-    return /\bWsl\/[A-Za-z0-9_/]+/.exec(output)?.[0];
-}
-
 ;// CONCATENATED MODULE: ./src/distro/install.ts
 
 /** Error codes that mean the runner can't run a virtual machine for WSL 2. */
@@ -98438,6 +98666,8 @@ async function msiexec(args) {
 
 
 
+
+
 /** Runs the action, failing the step with a message rather than throwing. */
 async function run() {
     try {
@@ -98451,9 +98681,12 @@ async function run() {
         const instanceName = getInput('instance-name').trim() || distribution;
         const wslVersion = parseWslVersion(getInput('wsl-version'));
         const useCache = getBooleanInput('cache');
+        const allowDegraded = getBooleanInput('allow-degraded');
+        const timeout = parseTimeout(getInput('cloud-init-timeout'));
         if (distribution) {
             checkInstanceName(instanceName);
         }
+        const seed = readSeed(distribution, instanceName, wslVersion);
         const version = await ensurePackage(request, token);
         const wslc = wslcPath();
         info(`Using WSL ${version.package} with kernel ${version.kernel}.`);
@@ -98469,14 +98702,44 @@ async function run() {
         }
         const image = findImage(await fetchManifest(), distribution, await nativeArch());
         const download = await group(`Download ${image.name}`, () => downloadImage(image, useCache));
-        await group(`Install ${instanceName} as WSL ${wslVersion}`, () => installImage(instanceName, download.path, wslVersion));
-        info(`Installed ${image.name} as ${instanceName}, a WSL ${wslVersion} instance.`);
-        setOutput('instance-name', instanceName);
-        setOutput('cache-hit', String(download.cacheHit));
+        // cloud-init reads the seed on the instance's first boot, so it must be in place first.
+        const removeSeed = seed ? placeSeed(instanceName, seed) : undefined;
+        try {
+            await group(`Install ${instanceName} as WSL ${wslVersion}`, () => installImage(instanceName, download.path, wslVersion));
+            info(`Installed ${image.name} as ${instanceName}, a WSL ${wslVersion} instance.`);
+            setOutput('instance-name', instanceName);
+            setOutput('cache-hit', String(download.cacheHit));
+            if (seed) {
+                const status = await provision(instanceName, timeout, allowDegraded);
+                info(`cloud-init provisioned ${instanceName} (${status}).`);
+                setOutput('cloud-init-status', status);
+            }
+        }
+        finally {
+            removeSeed?.();
+        }
     }
     catch (error) {
         setFailed(error instanceof Error ? error.message : String(error));
     }
+}
+/** Reads the cloud-init inputs into a seed, or undefined when there's no user-data. */
+function readSeed(distribution, instance, wslVersion) {
+    const userData = getInput('cloud-init-user-data').trim();
+    const metaData = getInput('cloud-init-meta-data').trim();
+    if (!userData && !metaData) {
+        return undefined;
+    }
+    if (!userData) {
+        throw new Error('cloud-init-meta-data needs cloud-init-user-data as well.');
+    }
+    if (!distribution) {
+        throw new Error('cloud-init-user-data needs a distribution to provision.');
+    }
+    if (wslVersion === 1) {
+        throw new Error("cloud-init needs WSL 2. WSL 1 instances don't run an init system, so cloud-init never starts. Set wsl-version to 2.");
+    }
+    return buildSeed(instance, readInputFile(userData, 'cloud-init-user-data'), metaData ? readInputFile(metaData, 'cloud-init-meta-data') : undefined);
 }
 
 

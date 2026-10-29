@@ -1,0 +1,16 @@
+#cloud-config
+# Creates a user, makes it the default and turns on systemd. The end-to-end tests check each.
+users:
+  - name: tester
+    uid: "1000"
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+write_files:
+  - path: /etc/wsl.conf
+    content: |
+      [boot]
+      systemd=true
+      [user]
+      default=tester
+runcmd:
+  - echo provisioned > /var/tmp/provisioned

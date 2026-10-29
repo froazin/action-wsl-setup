@@ -1,5 +1,7 @@
 import * as core from '@actions/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { provision } from '../src/cloudinit/provision.js'
+import { placeSeed } from '../src/cloudinit/seed.js'
 import { downloadImage } from '../src/distro/download.js'
 import { installImage, listInstances } from '../src/distro/install.js'
 import { fetchManifest } from '../src/distro/manifest.js'
@@ -11,6 +13,15 @@ vi.mock('@actions/core')
 vi.mock('../src/wsl/package.js')
 vi.mock('../src/wsl/exe.js')
 vi.mock('../src/distro/download.js')
+vi.mock('../src/cloudinit/provision.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/cloudinit/provision.js')>()),
+  provision: vi.fn(),
+}))
+vi.mock('../src/cloudinit/seed.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/cloudinit/seed.js')>()),
+  placeSeed: vi.fn(),
+  readInputFile: vi.fn((path: string) => `contents of ${path}`),
+}))
 vi.mock('../src/distro/manifest.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/distro/manifest.js')>()),
   fetchManifest: vi.fn(),
@@ -22,6 +33,7 @@ vi.mock('../src/distro/install.js', async (importOriginal) => ({
 }))
 
 const SHA = 'a'.repeat(64)
+const removeSeed = vi.fn()
 
 describe('run', () => {
   const inputs: Record<string, string> = {}
@@ -43,6 +55,8 @@ describe('run', () => {
       },
     })
     vi.mocked(downloadImage).mockResolvedValue({ path: 'D:\\a\\_temp\\u.wsl', cacheHit: true })
+    vi.mocked(provision).mockResolvedValue('done')
+    vi.mocked(placeSeed).mockReturnValue(removeSeed)
     Object.defineProperty(process, 'platform', { value: 'win32' })
   })
 
@@ -118,6 +132,48 @@ describe('run', () => {
     inputs['instance-name'] = 'has space'
     await run()
     expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/valid instance name/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('places the seed before the install, provisions and removes the seed', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['cloud-init-user-data'] = 'user-data'
+    inputs['cloud-init-timeout'] = '20'
+    await run()
+    expect(core.setFailed).not.toHaveBeenCalled()
+    expect(placeSeed).toHaveBeenCalledWith('Ubuntu-26.04', {
+      userData: 'contents of user-data',
+      metaData: 'instance-id: Ubuntu-26.04\n',
+    })
+    expect(vi.mocked(placeSeed).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(installImage).mock.invocationCallOrder[0] ?? 0,
+    )
+    expect(provision).toHaveBeenCalledWith('Ubuntu-26.04', 20, false)
+    expect(core.setOutput).toHaveBeenCalledWith('cloud-init-status', 'done')
+    expect(removeSeed).toHaveBeenCalled()
+  })
+
+  it('removes the seed when provisioning fails', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['cloud-init-user-data'] = 'user-data'
+    vi.mocked(provision).mockRejectedValue(new Error('cloud-init failed: boom'))
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith('cloud-init failed: boom')
+    expect(removeSeed).toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ 'cloud-init-user-data': 'u' }, /needs a distribution/],
+    [{ distribution: 'Ubuntu-26.04', 'cloud-init-meta-data': 'm' }, /needs cloud-init-user-data/],
+    [
+      { distribution: 'Ubuntu-26.04', 'cloud-init-user-data': 'u', 'wsl-version': '1' },
+      /cloud-init needs WSL 2/,
+    ],
+    [{ 'cloud-init-timeout': 'soon' }, /cloud-init-timeout/],
+  ])('checks the cloud-init inputs before changing the runner: %j', async (given, message) => {
+    Object.assign(inputs, given)
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(message))
     expect(ensurePackage).not.toHaveBeenCalled()
   })
 

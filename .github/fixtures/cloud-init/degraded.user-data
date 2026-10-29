@@ -1,0 +1,17 @@
+#cloud-config
+# ok.user-data with a key cloud-init doesn't know, so it warns and finishes degraded.
+not_a_cloud_init_key: true
+users:
+  - name: tester
+    uid: "1000"
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+write_files:
+  - path: /etc/wsl.conf
+    content: |
+      [boot]
+      systemd=true
+      [user]
+      default=tester
+runcmd:
+  - echo provisioned > /var/tmp/provisioned

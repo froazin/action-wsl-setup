@@ -39,6 +39,29 @@ inputs:
     description: Keep downloaded distribution images in the Actions cache, "true" or "false".
     required: false
     default: "true"
+  cloud-init-user-data:
+    description: >-
+      Path to cloud-init user-data for the instance's first boot, relative to the workspace. The
+      action waits for cloud-init to finish and fails if it fails. Needs a distribution whose
+      image includes cloud-init, and WSL 2.
+    required: false
+    default: ""
+  cloud-init-meta-data:
+    description: >-
+      Path to cloud-init meta-data, relative to the workspace. Without it, the action writes
+      meta-data with "instance-id" set to the instance's name.
+    required: false
+    default: ""
+  cloud-init-timeout:
+    description: How many minutes to wait for cloud-init to finish before failing.
+    required: false
+    default: "15"
+  allow-degraded:
+    description: >-
+      Accept cloud-init finishing with recoverable errors, or systemd starting with failed units,
+      with a warning instead of failing. "true" or "false".
+    required: false
+    default: "false"
 outputs:
   wsl-package-version:
     description: The installed WSL package version, such as "3.0.3.0".
@@ -50,6 +73,8 @@ outputs:
     description: The name of the installed instance, or empty when no distribution was asked for.
   cache-hit:
     description: '"true" when the distribution image came from the Actions cache, otherwise "false".'
+  cloud-init-status:
+    description: '"done" or "degraded" after cloud-init provisioned the instance, or empty without user-data.'
 runs:
   using: node24
   main: dist/index.js
