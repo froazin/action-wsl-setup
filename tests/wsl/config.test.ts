@@ -22,6 +22,8 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'home-'))
   vi.stubEnv('USERPROFILE', home)
   vi.stubEnv('GITHUB_WORKSPACE', home)
+  // CI runs these tests on a GitHub-hosted runner, which sets it to github-hosted.
+  vi.stubEnv('RUNNER_ENVIRONMENT', '')
 })
 
 afterEach(() => {
