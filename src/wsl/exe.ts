@@ -37,6 +37,34 @@ export async function wsl(args: string[], options: { silent?: boolean } = {}): P
   return { exitCode: result.exitCode, stdout: clean(result.stdout + result.stderr) }
 }
 
+/**
+ * Returns Windows' own architecture, `x64` or `arm64`. Node's process.arch is the architecture
+ * Node was built for, which is x64 when an x64 runner runs under emulation on ARM64 Windows. The
+ * registry holds the machine's architecture whatever process reads it. Falls back to
+ * process.arch when the query fails.
+ */
+export async function nativeArch(): Promise<string> {
+  const reg = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe')
+  const key = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'
+  try {
+    const result = await getExecOutput(`"${reg}"`, ['query', key, '/v', 'PROCESSOR_ARCHITECTURE'], {
+      ignoreReturnCode: true,
+      silent: true,
+    })
+    return parseArch(result.stdout) ?? process.arch
+  } catch {
+    return process.arch
+  }
+}
+
+/** Reads PROCESSOR_ARCHITECTURE from `reg query` output as `x64` or `arm64`. */
+export function parseArch(output: string): string | undefined {
+  const value = /PROCESSOR_ARCHITECTURE\s+REG_SZ\s+(\S+)/i.exec(output)?.[1]?.toUpperCase()
+  if (value === 'AMD64') return 'x64'
+  if (value === 'ARM64') return 'arm64'
+  return undefined
+}
+
 /** Removes the NULs and carriage returns wsl.exe can leave in its output. */
 export function clean(output: string): string {
   return output.replace(/\0/g, '').replace(/\r/g, '')

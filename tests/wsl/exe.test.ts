@@ -1,6 +1,13 @@
 import { getExecOutput } from '@actions/exec'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clean, parseErrorCode, parseVersion, wsl } from '../../src/wsl/exe.js'
+import {
+  clean,
+  nativeArch,
+  parseArch,
+  parseErrorCode,
+  parseVersion,
+  wsl,
+} from '../../src/wsl/exe.js'
 
 vi.mock('@actions/exec')
 
@@ -77,5 +84,41 @@ describe('wsl', () => {
     expect(options?.input).toEqual(Buffer.alloc(0))
     expect(options?.env?.WSL_UTF8).toBe('1')
     expect(result).toEqual({ exitCode: 0, stdout: 'ok\n' })
+  })
+})
+
+describe('parseArch', () => {
+  const output = (value: string) =>
+    `\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment\r\n    PROCESSOR_ARCHITECTURE    REG_SZ    ${value}\r\n\r\n`
+
+  it.each([
+    ['AMD64', 'x64'],
+    ['ARM64', 'arm64'],
+  ])('maps %s to %s', (value, arch) => {
+    expect(parseArch(output(value))).toBe(arch)
+  })
+
+  it('returns undefined for anything else', () => {
+    expect(parseArch(output('x86'))).toBeUndefined()
+    expect(parseArch('ERROR: The system was unable to find the specified registry key.')).toBe(
+      undefined,
+    )
+  })
+})
+
+describe('nativeArch', () => {
+  it("reads the machine's architecture from the registry", async () => {
+    vi.mocked(getExecOutput).mockResolvedValue({
+      exitCode: 0,
+      stdout: '    PROCESSOR_ARCHITECTURE    REG_SZ    ARM64\r\n',
+      stderr: '',
+    })
+    await expect(nativeArch()).resolves.toBe('arm64')
+    expect(vi.mocked(getExecOutput).mock.calls[0]?.[0]).toMatch(/^"[^"]*reg\.exe"$/)
+  })
+
+  it("falls back to Node's architecture when reg.exe fails", async () => {
+    vi.mocked(getExecOutput).mockRejectedValue(new Error('spawn failed'))
+    await expect(nativeArch()).resolves.toBe(process.arch)
   })
 })

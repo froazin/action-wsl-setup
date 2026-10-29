@@ -34,10 +34,10 @@ This flowchart shows how `ensurePackage` decides whether to install a release:
 ```mermaid
 flowchart TD
     accTitle: How ensurePackage decides whether to install WSL
-    accDescr: ensurePackage reads the installed package version. With an empty wsl-package-version and a package present it keeps that package. Otherwise it looks up the newest release, or the pinned one, and installs it unless the installed package is already that release. After installing it reads the version again and checks it matches.
+    accDescr: ensurePackage reads the installed package version. It keeps that package when wsl-package-version is empty or pins the release that's installed. Otherwise it looks up the newest release, or the pinned one, and installs it unless the installed package is already that release. After installing it reads the version again and checks it matches.
     start["ensurePackage(request)"] -->|"wsl.exe --version"| installed{"Package installed?"}
-    installed -->|"yes, request is runner"| keep["Keep the runner's package"]
-    installed -->|"no, or request is latest or exact"| lookup["findRelease: GitHub API"]
+    installed -->|"yes, request is runner or pins this release"| keep["Keep the runner's package"]
+    installed -->|"no, or another release is asked for"| lookup["findRelease: GitHub API"]
     lookup -->|"WslRelease"| same{"isRelease(installed, tag)?"}
     same -->|yes| keep
     same -->|no| download["downloadTool, then check SHA-256"]
@@ -49,9 +49,10 @@ flowchart TD
 
 - **Request:** `parsePackageRequest` maps an empty input to `runner`, `latest` to `latest`, and a release such as `3.0.3` (or `3.0.3.0`, or `v3.0.3`) to `exact`. Anything else fails before the action changes the runner.
 - **Installed version:** `installedVersion` runs `%ProgramFiles%\WSL\wsl.exe --version`. When that file doesn't exist, no package is installed. Straight after an install, `wsl.exe` can print "WSL is finishing an upgrade" first, so it retries for up to about 30 seconds.
-- **Matching:** a package reports four parts, such as `3.0.3.0`, and a release tag three, such as `3.0.3`. `isRelease` compares every part, treating missing parts as `0`.
-- **Release lookup:** `findRelease` reads `releases/latest` or `releases/tags/<tag>` from the GitHub API. `latest` never returns a prerelease. `toWslRelease` picks the `wsl.<version>.<arch>.msi` asset for `process.arch` and its `sha256:` digest.
-- **Install:** the MSI downloads to `RUNNER_TEMP`, its SHA-256 is checked against GitHub's digest, and `msiexec` installs it quietly with a verbose log. The MSI allows downgrades, so an exact pin can be older than the runner's package.
+- **Matching:** a package reports four parts, such as `3.0.3.0`, and a release tag three, such as `3.0.3`. `isRelease` compares every part, treating missing parts as `0`. A pin the runner already has is kept without a lookup, so it works without access to GitHub's API.
+- **Release lookup:** `findRelease` reads `releases/latest` or `releases/tags/<tag>` from the GitHub API. `latest` never returns a prerelease. It tries three times when the request fails or GitHub returns a server error, and gives each try 30 seconds.
+- **Architecture:** `nativeArch` reads `PROCESSOR_ARCHITECTURE` from the registry with `reg.exe`, because `process.arch` is Node's architecture, which is x64 when an x64 runner runs under emulation on ARM64 Windows. `toWslRelease` picks the `wsl.<version>.<arch>.msi` asset for it, and its `sha256:` digest.
+- **Install:** the MSI downloads into a new `wsl-<uuid>` directory under `RUNNER_TEMP`, because `downloadTool` won't overwrite a file and a job can install the same release twice. Its SHA-256 is checked against GitHub's digest, and `msiexec` installs it quietly with a verbose log. The MSI allows downgrades, so an exact pin can be older than the runner's package (observed on `windows-2025`, from 3.0.3.0 to 2.7.14.0).
 - **wslc:** `wslcPath` returns `%ProgramFiles%\WSL\wslc.exe` when it exists, for the `wslc-path` output.
 
 ## Interfaces
@@ -67,6 +68,8 @@ flowchart TD
 - Every failure is an `Error` with a message for the workflow's user. `run` in [`src/main.ts`](../src/main.ts) catches it and fails the step with `core.setFailed`.
 - A failed `msiexec` prints the last 40 lines of its log. The log is UTF-16LE.
 - `msiexec` exit codes 3010 and 1641 mean Windows must restart, which can't happen during a job, so they fail with that reason.
+- `msiexec` exit code 1618 means another Windows Installer transaction is running, such as an update. The action tries again every 15 seconds for about 5 minutes before it fails.
+- A failed release lookup names the URL and the reason fetch gives, such as a DNS error.
 - An install whose `wsl --version` doesn't report the requested release fails rather than carrying on with the wrong package.
 
 ## Security

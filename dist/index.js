@@ -34138,6 +34138,35 @@ async function wsl(args, options = {}) {
     });
     return { exitCode: result.exitCode, stdout: clean(result.stdout + result.stderr) };
 }
+/**
+ * Returns Windows' own architecture, `x64` or `arm64`. Node's process.arch is the architecture
+ * Node was built for, which is x64 when an x64 runner runs under emulation on ARM64 Windows. The
+ * registry holds the machine's architecture whatever process reads it. Falls back to
+ * process.arch when the query fails.
+ */
+async function nativeArch() {
+    const reg = (0,external_node_path_namespaceObject.join)(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'reg.exe');
+    const key = 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment';
+    try {
+        const result = await getExecOutput(`"${reg}"`, ['query', key, '/v', 'PROCESSOR_ARCHITECTURE'], {
+            ignoreReturnCode: true,
+            silent: true,
+        });
+        return parseArch(result.stdout) ?? process.arch;
+    }
+    catch {
+        return process.arch;
+    }
+}
+/** Reads PROCESSOR_ARCHITECTURE from `reg query` output as `x64` or `arm64`. */
+function parseArch(output) {
+    const value = /PROCESSOR_ARCHITECTURE\s+REG_SZ\s+(\S+)/i.exec(output)?.[1]?.toUpperCase();
+    if (value === 'AMD64')
+        return 'x64';
+    if (value === 'ARM64')
+        return 'arm64';
+    return undefined;
+}
 /** Removes the NULs and carriage returns wsl.exe can leave in its output. */
 function clean(output) {
     return output.replace(/\0/g, '').replace(/\r/g, '');
@@ -34967,6 +34996,7 @@ function _unique(values) {
 }
 //# sourceMappingURL=tool-cache.js.map
 ;// CONCATENATED MODULE: ./src/wsl/releases.ts
+
 const REPO = 'microsoft/WSL';
 /**
  * Parses the `wsl-package-version` input: empty keeps the runner's package, `latest` asks for the
@@ -35030,7 +35060,7 @@ async function findRelease(request, arch, token) {
         headers.Authorization = `Bearer ${token}`;
     }
     const url = `https://api.github.com/repos/${REPO}/releases/${path}`;
-    const response = await fetch(url, { headers });
+    const response = await get(url, headers);
     if (response.status === 404 && request.kind === 'exact') {
         throw new Error(`WSL release ${request.tag} doesn't exist. See https://github.com/${REPO}/releases.`);
     }
@@ -35038,6 +35068,33 @@ async function findRelease(request, arch, token) {
         throw new Error(`Couldn't look up the WSL release: ${url} returned ${response.status}.`);
     }
     return toWslRelease((await response.json()), arch);
+}
+/**
+ * Fetches a URL, trying up to three times when the request fails or GitHub returns a server
+ * error, and giving each try 30 seconds.
+ */
+async function get(url, headers) {
+    for (let attempt = 1;; attempt++) {
+        try {
+            const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
+            if (response.status < 500 || attempt === 3) {
+                return response;
+            }
+        }
+        catch (error) {
+            if (attempt === 3) {
+                throw new Error(`Couldn't look up the WSL release at ${url}: ${describe(error)}`);
+            }
+        }
+        await (0,promises_namespaceObject.setTimeout)(2000 * attempt);
+    }
+}
+/** An error's message, with its cause, which holds the reason when fetch fails. */
+function describe(error) {
+    if (!(error instanceof Error)) {
+        return String(error);
+    }
+    return error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error.message;
 }
 
 ;// CONCATENATED MODULE: ./src/wsl/package.ts
@@ -35050,6 +35107,10 @@ async function findRelease(request, arch, token) {
 
 
 
+/** msiexec exit codes that mean Windows must restart before the install takes effect. */
+const RESTART_REQUIRED = [3010, 1641];
+/** msiexec's exit code when another Windows Installer transaction is running. */
+const INSTALL_ALREADY_RUNNING = 1618;
 /** Reads the installed WSL package's version, or undefined when no package is installed. */
 async function installedVersion() {
     if (!(0,external_node_fs_namespaceObject.existsSync)((0,external_node_path_namespaceObject.join)(packageDir(), 'wsl.exe'))) {
@@ -35080,7 +35141,12 @@ async function ensurePackage(request, token) {
     if (installed && request.kind === 'runner') {
         return installed;
     }
-    const release = await findRelease(request.kind === 'exact' ? request : { kind: 'latest' }, process.arch, token);
+    // A pin the runner already has needs no lookup, so it works without access to GitHub's API.
+    if (installed && request.kind === 'exact' && isRelease(installed.package, request.tag)) {
+        info(`WSL ${installed.package} is already release ${request.tag}.`);
+        return installed;
+    }
+    const release = await findRelease(request.kind === 'exact' ? request : { kind: 'latest' }, await nativeArch(), token);
     if (installed && isRelease(installed.package, release.tag)) {
         info(`WSL ${installed.package} is already release ${release.tag}.`);
         return installed;
@@ -35096,9 +35162,11 @@ async function ensurePackage(request, token) {
     return version;
 }
 async function install(release) {
-    const temp = process.env.RUNNER_TEMP ?? process.env.TEMP ?? '.';
+    // A directory of its own for each install, because downloadTool won't overwrite a file and a
+    // job can install the same release twice.
+    const dir = (0,external_node_path_namespaceObject.join)(process.env.RUNNER_TEMP ?? process.env.TEMP ?? '.', `wsl-${(0,external_node_crypto_.randomUUID)()}`);
     info(`Downloading ${release.msiUrl}`);
-    const msi = await downloadTool(release.msiUrl, (0,external_node_path_namespaceObject.join)(temp, release.msiName));
+    const msi = await downloadTool(release.msiUrl, (0,external_node_path_namespaceObject.join)(dir, release.msiName));
     if (release.sha256) {
         const actual = await sha256(msi);
         if (actual !== release.sha256) {
@@ -35109,10 +35177,8 @@ async function install(release) {
     else {
         warning(`GitHub lists no SHA-256 for ${release.msiName}, so it isn't verified.`);
     }
-    const log = (0,external_node_path_namespaceObject.join)(temp, `${release.msiName}.log`);
-    const exitCode = await exec_exec('msiexec.exe', ['/i', msi, '/qn', '/norestart', '/l*v', log], {
-        ignoreReturnCode: true,
-    });
+    const log = (0,external_node_path_namespaceObject.join)(dir, `${release.msiName}.log`);
+    const exitCode = await msiexec(['/i', msi, '/qn', '/norestart', '/l*v', log]);
     if (exitCode === 0) {
         return;
     }
@@ -35121,10 +35187,24 @@ async function install(release) {
         const lines = (0,external_node_fs_namespaceObject.readFileSync)(log, 'utf16le').split(/\r?\n/);
         info(lines.slice(-40).join('\n'));
     }
-    if (exitCode === 3010 || exitCode === 1641) {
+    if (RESTART_REQUIRED.includes(exitCode)) {
         throw new Error(`WSL ${release.tag} needs Windows to restart (msiexec exit code ${exitCode}), which can't happen during a job.`);
     }
+    if (exitCode === INSTALL_ALREADY_RUNNING) {
+        throw new Error(`Another Windows Installer installation was still running after 5 minutes, so WSL ${release.tag} couldn't install.`);
+    }
     throw new Error(`msiexec failed to install WSL ${release.tag} with exit code ${exitCode}.`);
+}
+/** Runs msiexec, waiting up to about 5 minutes while another installation holds the installer. */
+async function msiexec(args) {
+    for (let attempt = 1;; attempt++) {
+        const exitCode = await exec_exec('msiexec.exe', args, { ignoreReturnCode: true });
+        if (exitCode !== INSTALL_ALREADY_RUNNING || attempt === 20) {
+            return exitCode;
+        }
+        info('Another installation is in progress, so msiexec will try again in 15 seconds.');
+        await (0,promises_namespaceObject.setTimeout)(15_000);
+    }
 }
 async function sha256(path) {
     const hash = (0,external_node_crypto_.createHash)('sha256');

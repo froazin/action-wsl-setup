@@ -7,6 +7,8 @@ import {
   toWslRelease,
 } from '../../src/wsl/releases.js'
 
+vi.mock('node:timers/promises', () => ({ setTimeout: vi.fn(async () => undefined) }))
+
 const RELEASE = {
   tag_name: '3.0.3',
   assets: [
@@ -134,6 +136,28 @@ describe('findRelease', () => {
     await expect(findRelease({ kind: 'exact', tag: '9.9.9' }, 'x64', '')).rejects.toThrow(
       /WSL release 9\.9\.9 doesn't exist/,
     )
+  })
+
+  it('retries server errors', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    fetch.mockResolvedValueOnce(new Response('', { status: 502 }))
+    fetch.mockResolvedValueOnce(new Response(JSON.stringify(RELEASE), { status: 200 }))
+    vi.stubGlobal('fetch', fetch)
+    await expect(findRelease({ kind: 'latest' }, 'x64', '')).resolves.toMatchObject({
+      tag: '3.0.3',
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('says why the request failed after three tries', async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => {
+      throw new TypeError('fetch failed', { cause: new Error('getaddrinfo ENOTFOUND') })
+    })
+    vi.stubGlobal('fetch', fetch)
+    await expect(findRelease({ kind: 'latest' }, 'x64', '')).rejects.toThrow(
+      /releases\/latest: fetch failed: getaddrinfo ENOTFOUND/,
+    )
+    expect(fetch).toHaveBeenCalledTimes(3)
   })
 
   it('reports other API failures', async () => {
