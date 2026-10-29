@@ -1,0 +1,94 @@
+---
+name: End-to-end
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Package ${{ matrix.package || 'default' }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # A WSL job can freeze the runner, and then step timeouts never fire.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            package: ""
+          - os: windows-2022
+            package: ""
+          - os: windows-11-arm
+            package: ""
+          # 2.7.14 is older than windows-2025's package and has no wslc.exe.
+          - os: windows-2025
+            package: "2.7.14"
+          - os: windows-2022
+            package: "2.7.14"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up WSL
+        id: wsl
+        uses: ./
+        with:
+          wsl-package-version: ${{ matrix.package }}
+
+      - name: Check the outputs
+        shell: pwsh
+        env:
+          WSL_UTF8: "1"
+          PACKAGE: ${{ steps.wsl.outputs.wsl-package-version }}
+          KERNEL: ${{ steps.wsl.outputs.kernel-version }}
+          WSLC: ${{ steps.wsl.outputs.wslc-path }}
+          WANT: ${{ matrix.package }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Fail($message) { Write-Output "::error::$message"; exit 1 }
+          Write-Output "wsl-package-version=$env:PACKAGE kernel-version=$env:KERNEL wslc-path=$env:WSLC"
+          if (-not $env:PACKAGE) { Fail 'wsl-package-version is empty.' }
+          if (-not $env:KERNEL) { Fail 'kernel-version is empty.' }
+
+          $first = (& "$env:ProgramFiles\WSL\wsl.exe" --version | Select-Object -First 1)
+          if ($LASTEXITCODE -ne 0) { Fail "wsl.exe --version exited with $LASTEXITCODE." }
+          if (-not $first.EndsWith($env:PACKAGE)) { Fail "wsl.exe reports '$first', not $env:PACKAGE." }
+
+          if ($env:WANT -and -not $env:PACKAGE.StartsWith("$env:WANT.")) {
+            Fail "Asked for WSL $env:WANT but got $env:PACKAGE."
+          }
+          $hasWslc = [int]$env:PACKAGE.Split('.')[0] -ge 3
+          if ($hasWslc -and -not (Test-Path -LiteralPath $env:WSLC)) { Fail "wslc-path '$env:WSLC' doesn't exist." }
+          if (-not $hasWslc -and $env:WSLC) { Fail "WSL $env:PACKAGE has no wslc.exe, but wslc-path is '$env:WSLC'." }
+
+  not-windows:
+    name: Fail on Linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up WSL
+        id: wsl
+        uses: ./
+        continue-on-error: true
+
+      - name: Check the action failed
+        if: steps.wsl.outcome != 'failure'
+        run: |
+          echo "::error::The action should fail on Linux, but its outcome was ${{ steps.wsl.outcome }}."
+          exit 1
