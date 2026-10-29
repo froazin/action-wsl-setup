@@ -62,6 +62,20 @@ inputs:
       with a warning instead of failing. "true" or "false".
     required: false
     default: "false"
+  wslconfig:
+    description: >-
+      The .wslconfig to set up in the user's profile. "default" writes settings for a runner
+      without a desktop, but only on GitHub-hosted runners, and keeps a .wslconfig that's already
+      there. "none" leaves .wslconfig alone. Anything else is a path to a .wslconfig, relative to
+      the workspace, which fails rather than replace another .wslconfig.
+    required: false
+    default: default
+  wslconfig-overwrite:
+    description: >-
+      Replace a .wslconfig that's already there with other content, "true" or "false". It never
+      makes "default" write on a self-hosted runner.
+    required: false
+    default: "false"
 outputs:
   wsl-package-version:
     description: The installed WSL package version, such as "3.0.3.0".

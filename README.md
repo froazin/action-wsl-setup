@@ -52,6 +52,24 @@ The action puts the user-data, and meta-data if you give it, in `%USERPROFILE%\.
 
 cloud-init needs WSL 2 and a distribution whose image includes it, such as `Ubuntu-26.04`. `FedoraLinux-44`'s image doesn't include it. If a seed file for the instance is already in `%USERPROFILE%\.cloud-init` with other content, the action fails rather than replace it.
 
+### .wslconfig
+
+On GitHub-hosted runners, the action writes a `.wslconfig` to the user's profile before any instance starts:
+
+```ini
+[wsl2]
+guiApplications=false
+
+[general]
+instanceIdleTimeout=-1
+```
+
+Jobs run without a desktop, so WSLg has nothing to show. `instanceIdleTimeout=-1` keeps an idle instance running between steps, so its services don't start again for each step. If the runner already has a `.wslconfig`, the action keeps it. On a self-hosted runner, the action leaves `.wslconfig` alone, because the file would outlive the job.
+
+Set `wslconfig` to the path of your own `.wslconfig` to use it instead, on any runner. If a different `.wslconfig` is already there, the action fails rather than replace it, unless you set `wslconfig-overwrite: true`. Set `wslconfig: none` to leave `.wslconfig` alone.
+
+When the action writes a `.wslconfig`, it runs `wsl --shutdown` so WSL reads it, and warns if that stopped running instances. It doesn't restore the old file afterwards.
+
 > [!IMPORTANT]
 > A job that uses WSL can occasionally freeze the runner, and then step timeouts don't fire. Set `timeout-minutes` on the job.
 
@@ -69,6 +87,8 @@ cloud-init needs WSL 2 and a distribution whose image includes it, such as `Ubun
 | `cloud-init-meta-data` | Empty | Path to cloud-init meta-data. Without it, the action writes meta-data with `instance-id` set to the instance's name |
 | `cloud-init-timeout` | `15` | Minutes to wait for cloud-init before failing, above 0 and up to 35791 |
 | `allow-degraded` | `false` | Accept cloud-init finishing with recoverable errors, such as a deprecated key, or systemd starting with failed units, with a warning instead of failing |
+| `wslconfig` | `default` | `default` writes the action's `.wslconfig` on GitHub-hosted runners only, and keeps an existing one. `none` leaves `.wslconfig` alone. Anything else is a path to a `.wslconfig`, relative to the workspace |
+| `wslconfig-overwrite` | `false` | Replace a `.wslconfig` that's already there with other content. It never makes `default` write on a self-hosted runner |
 
 ### Outputs
 
@@ -92,6 +112,7 @@ The action will also:
 The action is written in TypeScript and bundled into JavaScript with ncc. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, testing and CI. The design docs explain how each part works:
 
 - [WSL package](docs/wsl-package.md): finding, installing and pinning the WSL package
+- [.wslconfig](docs/wslconfig.md): deciding whether to write `.wslconfig`, and applying it
 - [Distributions](docs/distributions.md): downloading, caching and installing distribution images
 - [cloud-init](docs/cloud-init.md): seeding, waiting for and judging cloud-init
 

@@ -278,6 +278,75 @@ jobs:
           INSTANCE: ${{ steps.wsl.outputs.instance-name }}
         run: ./.github/scripts/check-cloud-init.ps1 -Instance $env:INSTANCE
 
+  wslconfig:
+    name: wslconfig ${{ matrix.case }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # An instance stays up while idle with the default, and WSL stops it without.
+          - case: default
+            wslconfig: default
+            distribution: Ubuntu-26.04
+            expected: default
+            idle: running
+          - case: none
+            wslconfig: none
+            distribution: Ubuntu-26.04
+            expected: absent
+            idle: stopped
+          - case: default keeps an existing file
+            existing: true
+            wslconfig: default
+            expected: .github/fixtures/wslconfig/existing.wslconfig
+          - case: path refuses to replace an existing file
+            existing: true
+            wslconfig: .github/fixtures/wslconfig/custom.wslconfig
+            expected: .github/fixtures/wslconfig/existing.wslconfig
+            expect: failure
+          - case: path replaces an existing file when told to
+            existing: true
+            wslconfig: .github/fixtures/wslconfig/custom.wslconfig
+            overwrite: true
+            expected: .github/fixtures/wslconfig/custom.wslconfig
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Put a .wslconfig in place
+        if: matrix.existing
+        shell: pwsh
+        run: Copy-Item .github/fixtures/wslconfig/existing.wslconfig (Join-Path $env:USERPROFILE '.wslconfig')
+
+      - name: Set up WSL
+        id: wsl
+        uses: ./
+        continue-on-error: ${{ matrix.expect == 'failure' }}
+        with:
+          distribution: ${{ matrix.distribution }}
+          wslconfig: ${{ matrix.wslconfig }}
+          wslconfig-overwrite: ${{ matrix.overwrite || false }}
+
+      - name: Check the step failed
+        if: matrix.expect == 'failure'
+        shell: pwsh
+        env:
+          OUTCOME: ${{ steps.wsl.outcome }}
+        run: |
+          if ($env:OUTCOME -ne 'failure') { Write-Output "::error::The step should fail, but its outcome was $env:OUTCOME."; exit 1 }
+
+      - name: Check .wslconfig
+        shell: pwsh
+        env:
+          EXPECTED: ${{ matrix.expected }}
+          INSTANCE: ${{ steps.wsl.outputs.instance-name }}
+          IDLE: ${{ matrix.idle }}
+        run: ./.github/scripts/check-wslconfig.ps1 -Expected $env:EXPECTED -Instance $env:INSTANCE -Idle $env:IDLE
+
   not-windows:
     name: Fail on Linux
     runs-on: ubuntu-26.04

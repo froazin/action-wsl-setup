@@ -6,12 +6,17 @@ import { downloadImage } from '../src/distro/download.js'
 import { installImage, listInstances } from '../src/distro/install.js'
 import { fetchManifest } from '../src/distro/manifest.js'
 import { post, run } from '../src/main.js'
+import { applyWslConfig } from '../src/wsl/config.js'
 import { nativeArch, wslcPath } from '../src/wsl/exe.js'
 import { ensurePackage } from '../src/wsl/package.js'
 
 vi.mock('@actions/core')
 vi.mock('../src/wsl/package.js')
 vi.mock('../src/wsl/exe.js')
+vi.mock('../src/wsl/config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/wsl/config.js')>()),
+  applyWslConfig: vi.fn(),
+}))
 vi.mock('../src/distro/download.js')
 vi.mock('../src/cloudinit/provision.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/cloudinit/provision.js')>()),
@@ -71,6 +76,24 @@ describe('run', () => {
     expect(core.setOutput).toHaveBeenCalledWith('wsl-package-version', '3.0.3.0')
     expect(core.setOutput).toHaveBeenCalledWith('kernel-version', '6.18.54.1-1')
     expect(core.setOutput).toHaveBeenCalledWith('wslc-path', 'C:\\Program Files\\WSL\\wslc.exe')
+  })
+
+  it('sets up .wslconfig after the package and before the install', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['wslconfig-overwrite'] = 'true'
+    await run()
+    expect(applyWslConfig).toHaveBeenCalledWith({ kind: 'default' }, true)
+    const order = (fn: unknown) =>
+      vi.mocked(fn as () => void).mock.invocationCallOrder[0] ?? Number.NaN
+    expect(order(ensurePackage)).toBeLessThan(order(applyWslConfig))
+    expect(order(applyWslConfig)).toBeLessThan(order(installImage))
+  })
+
+  it('fails on a missing wslconfig file before changing the runner', async () => {
+    inputs.wslconfig = 'missing.wslconfig'
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wslconfig is missing/))
+    expect(ensurePackage).not.toHaveBeenCalled()
   })
 
   it("doesn't install a distribution unless one is asked for", async () => {
