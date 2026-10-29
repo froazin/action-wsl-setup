@@ -6,7 +6,7 @@ import * as cache from '@actions/cache'
 import * as core from '@actions/core'
 import { downloadTool } from '@actions/tool-cache'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { downloadImage } from '../../src/distro/download.js'
+import { downloadImage, useLocalImage } from '../../src/distro/download.js'
 import type { DistroImage } from '../../src/distro/manifest.js'
 
 vi.mock('@actions/core')
@@ -49,7 +49,7 @@ describe('downloadImage', () => {
       path: expectedPath,
       cacheHit: false,
     })
-    expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath)
+    expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath, undefined)
     expect(cache.saveCache).toHaveBeenCalledWith([expectedPath], `wsl-image-${IMAGE.sha256}`)
   })
 
@@ -103,7 +103,7 @@ describe('downloadImage', () => {
       put(String(dest), Buffer.from('tampered'))
       return String(dest)
     })
-    await expect(downloadImage(IMAGE, true)).rejects.toThrow(/but the manifest lists/)
+    await expect(downloadImage(IMAGE, true)).rejects.toThrow(/has SHA-256 [0-9a-f]+, not /)
     expect(existsSync(expectedPath)).toBe(false)
     expect(cache.saveCache).not.toHaveBeenCalled()
   })
@@ -124,5 +124,42 @@ describe('downloadImage', () => {
     vi.mocked(cache.saveCache).mockResolvedValue(42)
     await downloadImage(IMAGE, true)
     expect(core.info).toHaveBeenCalledWith('Saved ubuntu.wsl to the cache.')
+  })
+})
+
+describe('downloadImage with a registry token', () => {
+  it('gets the token just before the download, and passes it as auth', async () => {
+    const authorize = vi.fn(async () => 'Bearer fresh')
+    await downloadImage({ ...IMAGE, authorize }, true)
+    expect(downloadTool).toHaveBeenCalledWith(IMAGE.url, expectedPath, 'Bearer fresh')
+    expect(authorize.mock.invocationCallOrder[0]).toBeGreaterThan(
+      vi.mocked(cache.restoreCache).mock.invocationCallOrder[0] ?? Number.NaN,
+    )
+  })
+
+  it("doesn't ask for a token when the cache has the image", async () => {
+    const authorize = vi.fn(async () => 'Bearer fresh')
+    vi.mocked(cache.restoreCache).mockImplementation(async (paths) => {
+      put(paths[0] as string)
+      return 'key'
+    })
+    await downloadImage({ ...IMAGE, authorize }, true)
+    expect(authorize).not.toHaveBeenCalled()
+  })
+})
+
+describe('useLocalImage', () => {
+  it('uses the file as it is without a SHA-256', async () => {
+    await expect(useLocalImage('D:\\a\\my.wsl')).resolves.toEqual({
+      path: 'D:\\a\\my.wsl',
+      cacheHit: false,
+    })
+  })
+
+  it('checks the file against a SHA-256', async () => {
+    const path = join(temp, 'my.wsl')
+    put(path)
+    await expect(useLocalImage(path, IMAGE.sha256)).resolves.toEqual({ path, cacheHit: false })
+    await expect(useLocalImage(path, 'f'.repeat(64))).rejects.toThrow(/not f{64}/)
   })
 })

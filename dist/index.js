@@ -37773,7 +37773,7 @@ module.exports = {
 
 __nccwpck_require__.a(module, async (__webpack_handle_async_dependencies__, __webpack_async_result__) => { try {
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(3838);
-/* harmony import */ var _main_js__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(7310);
+/* harmony import */ var _main_js__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(661);
 // Entry point that ncc bundles into dist/index.js. action.yml runs it as the main step and again
 // as the post step, and the saved is-post state tells the two apart.
 
@@ -37791,7 +37791,7 @@ __webpack_async_result__();
 
 /***/ }),
 
-/***/ 7310:
+/***/ 661:
 /***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
 
 
@@ -95457,17 +95457,33 @@ async function downloadImage(image, useCache) {
         (0,external_node_fs_namespaceObject.rmSync)(path, { force: true });
     }
     lib_core/* info */.pq(`Downloading ${image.url}`);
-    await downloadTool(image.url, path);
+    // downloadTool sets auth afresh on each try. A shared headers object would lose it after a
+    // redirect to storage on another host, because @actions/http-client deletes it from the object.
+    await downloadTool(image.url, path, await image.authorize?.());
     const actual = await sha256(path);
     if (actual !== image.sha256) {
         (0,external_node_fs_namespaceObject.rmSync)(path, { force: true });
-        throw new Error(`${image.fileName} has SHA-256 ${actual}, but the manifest lists ${image.sha256}.`);
+        throw new Error(`${image.fileName} has SHA-256 ${actual}, not ${image.sha256}.`);
     }
-    lib_core/* info */.pq(`${image.fileName} matches its SHA-256 in the manifest.`);
+    lib_core/* info */.pq(`${image.fileName} matches its SHA-256.`);
     // saveCache returns -1 when it didn't save, such as when another job is saving the same key,
     // and it has already logged why.
     if (caching && (await cache_saveCache([path], key)) !== -1) {
         lib_core/* info */.pq(`Saved ${image.fileName} to the cache.`);
+    }
+    return { path, cacheHit: false };
+}
+/**
+ * Uses an image file that's already on the runner, such as one an earlier step built. With a
+ * SHA-256, it checks the file first.
+ */
+async function useLocalImage(path, expected) {
+    if (expected) {
+        const actual = await sha256(path);
+        if (actual !== expected) {
+            throw new Error(`${path} has SHA-256 ${actual}, not ${expected}.`);
+        }
+        lib_core/* info */.pq(`${path} matches its SHA-256.`);
     }
     return { path, cacheHit: false };
 }
@@ -95552,16 +95568,23 @@ const promises_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.ur
  */
 async function get(url, headers, what) {
     for (let attempt = 1;; attempt++) {
+        let response;
         try {
-            const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
-            if (response.status < 500 || attempt === 3) {
-                return response;
-            }
+            response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
         }
         catch (error) {
             if (attempt === 3) {
                 throw new Error(`Couldn't fetch ${what} from ${url}: ${describe(error)}`);
             }
+            await (0,promises_namespaceObject.setTimeout)(2000 * attempt);
+            continue;
+        }
+        // fetch follows redirects, including from https to http.
+        if (response.redirected && !response.url.startsWith('https://')) {
+            throw new Error(`Couldn't fetch ${what}: ${url} redirected to ${response.url}, not https.`);
+        }
+        if (response.status < 500 || attempt === 3) {
+            return response;
         }
         await (0,promises_namespaceObject.setTimeout)(2000 * attempt);
     }
@@ -95622,6 +95645,247 @@ function fileName(url, fallback) {
         return `${fallback}.wsl`;
     }
     return /^[\w.-]+$/.test(last) && !/^\.+$/.test(last) ? last : `${fallback}.wsl`;
+}
+
+;// CONCATENATED MODULE: ./src/distro/oci.ts
+
+
+/** A repository name, by the OCI distribution spec's grammar. */
+const COMPONENT = '[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*';
+const REPOSITORY = new RegExp(`^${COMPONENT}(?:/${COMPONENT})*$`);
+const MANIFEST_TYPES = [
+    'application/vnd.oci.image.index.v1+json',
+    'application/vnd.oci.image.manifest.v1+json',
+    'application/vnd.docker.distribution.manifest.list.v2+json',
+    'application/vnd.docker.distribution.manifest.v2+json',
+];
+/**
+ * Splits a reference such as `ghcr.io/owner/image:tag` or `ghcr.io/owner/image@sha256:...`. A
+ * reference without a registry, such as `alpine:3.22`, is on Docker Hub, as it is for docker pull.
+ */
+function parseOciReference(input) {
+    let rest = input.trim();
+    let digest;
+    const at = rest.indexOf('@');
+    if (at !== -1) {
+        digest = rest.slice(at + 1).toLowerCase();
+        rest = rest.slice(0, at);
+        if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+            throw new Error(`image ${input} must pin a sha256: digest after @.`);
+        }
+    }
+    const slash = rest.indexOf('/');
+    const first = slash === -1 ? '' : rest.slice(0, slash);
+    const hasRegistry = first.includes('.') || first.includes(':') || first === 'localhost';
+    // docker pull treats the legacy host as Docker Hub too.
+    let registry = !hasRegistry || first === 'index.docker.io' ? 'docker.io' : first;
+    let path = hasRegistry ? rest.slice(slash + 1) : rest;
+    const colon = path.lastIndexOf(':');
+    const tag = colon === -1 ? undefined : path.slice(colon + 1);
+    path = colon === -1 ? path : path.slice(0, colon);
+    const validTag = tag === undefined || /^\w[\w.-]{0,127}$/.test(tag);
+    if (!validTag || !REPOSITORY.test(path)) {
+        throw new Error(`image ${input} isn't an OCI reference such as oci://ghcr.io/owner/image:tag.`);
+    }
+    if (registry === 'docker.io') {
+        registry = 'registry-1.docker.io';
+        path = path.includes('/') ? path : `library/${path}`;
+    }
+    return { registry, repository: path, reference: digest ?? tag ?? 'latest', digest };
+}
+/** The OCI name for a Windows architecture from nativeArch. */
+function ociArch(arch) {
+    return arch === 'x64' ? 'amd64' : arch;
+}
+/**
+ * Finds the distribution image an OCI reference points at, for an architecture. An image index
+ * picks the manifest for the architecture. The manifest's layer is the image: its only layer, or
+ * the one whose title ends in `.wsl`, `.tar` or `.tar.gz`. The registry's digest becomes the
+ * SHA-256 the download is checked against.
+ */
+async function resolveOciImage(input, arch) {
+    const ref = parseOciReference(input);
+    const registry = new Registry(ref);
+    let manifest = await registry.manifest(ref.reference, ref.digest);
+    if (manifest.manifests) {
+        const platform = ociArch(arch);
+        const match = manifest.manifests.find((m) => m.platform?.architecture === platform && (m.platform.os ?? 'linux') === 'linux');
+        if (!match) {
+            const has = manifest.manifests.map((m) => m.platform?.architecture ?? 'unknown').join(', ');
+            throw new Error(`image ${input} has no linux/${platform} image. It has: ${has}.`);
+        }
+        manifest = await registry.manifest(match.digest, match.digest);
+    }
+    const layer = pickLayer(manifest.layers ?? [], input);
+    const sha256 = layer.digest.replace(/^sha256:/, '');
+    if (!/^[0-9a-f]{64}$/.test(sha256)) {
+        throw new Error(`image ${input}'s layer has a digest the action can't check: ${layer.digest}.`);
+    }
+    return {
+        name: input,
+        url: `https://${ref.registry}/v2/${ref.repository}/blobs/${layer.digest}`,
+        sha256,
+        fileName: layerFileName(layer, ref.repository),
+        authorize: () => registry.authorization(),
+    };
+}
+/** Picks the layer that holds the image. */
+function pickLayer(layers, input) {
+    const titled = layers.filter((l) => /\.(wsl|tar|tar\.gz)$/i.test(l.annotations?.['org.opencontainers.image.title'] ?? ''));
+    const [only] = layers.length === 1 ? layers : titled.length === 1 ? titled : [];
+    if (!only) {
+        throw new Error(`image ${input} has ${layers.length} layers, and the action can't tell which is the image. Push it with one layer, or with one whose title ends in .wsl.`);
+    }
+    return only;
+}
+/** The file name to save a layer as: its title, or the repository's last part with an extension. */
+function layerFileName(layer, repository) {
+    const title = layer.annotations?.['org.opencontainers.image.title'] ?? '';
+    if (/^[\w.-]+$/.test(title) && !/^\.+$/.test(title)) {
+        return title;
+    }
+    const name = repository.split('/').pop() ?? 'image';
+    // A plain tar layer stays .tar. A .wsl file is a gzipped tar, so a gzipped layer is one too.
+    return /tar$/.test(layer.mediaType ?? '') ? `${name}.tar` : `${name}.wsl`;
+}
+/** A registry's API for one repository, signing in anonymously when the registry asks. */
+class Registry {
+    ref;
+    token;
+    challenge;
+    constructor(ref) {
+        this.ref = ref;
+    }
+    headers() {
+        return this.token ? { Authorization: `Bearer ${this.token}` } : {};
+    }
+    /**
+     * The Authorization header for downloading a blob, with a new token when the registry wanted
+     * one. Tokens can last as little as 5 minutes, such as Docker Hub's, so this runs just before
+     * the download rather than reusing the manifest's token.
+     */
+    async authorization() {
+        if (!this.challenge) {
+            return undefined;
+        }
+        this.token = await this.signIn(this.challenge);
+        return `Bearer ${this.token}`;
+    }
+    /** Fetches a manifest, and checks it against a digest when one is given. */
+    async manifest(reference, digest) {
+        const url = `https://${this.ref.registry}/v2/${this.ref.repository}/manifests/${reference}`;
+        const what = `the manifest for ${this.ref.repository}`;
+        const accept = { Accept: MANIFEST_TYPES.join(', ') };
+        let response = await get(url, { ...accept, ...this.headers() }, what);
+        if (response.status === 401 && !this.token) {
+            this.challenge = response.headers.get('www-authenticate') ?? '';
+            this.token = await this.signIn(this.challenge);
+            response = await get(url, { ...accept, ...this.headers() }, what);
+        }
+        if (!response.ok) {
+            throw new Error(`Couldn't fetch ${url}: it returned ${response.status}.${explain(response)}`);
+        }
+        const body = Buffer.from(await response.arrayBuffer());
+        if (digest) {
+            const actual = `sha256:${(0,external_node_crypto_.createHash)('sha256').update(body).digest('hex')}`;
+            if (actual !== digest) {
+                throw new Error(`The manifest for ${reference} has digest ${actual}, not ${digest}.`);
+            }
+        }
+        try {
+            return JSON.parse(body.toString('utf8'));
+        }
+        catch {
+            const type = response.headers.get('content-type') ?? 'no content type';
+            throw new Error(`${url} didn't return an OCI manifest, but ${type}.`);
+        }
+    }
+    /** Gets an anonymous pull token from the realm a registry's Bearer challenge names. */
+    async signIn(challenge) {
+        const params = Object.fromEntries([...challenge.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+        if (!/^Bearer /i.test(challenge) || !params.realm?.startsWith('https://')) {
+            throw new Error(`${this.ref.registry} asked for credentials the action doesn't support: ${challenge || 'none'}.`);
+        }
+        const url = new URL(params.realm);
+        if (params.service)
+            url.searchParams.set('service', params.service);
+        url.searchParams.set('scope', params.scope ?? `repository:${this.ref.repository}:pull`);
+        const response = await get(url.toString(), {}, `a pull token from ${url.host}`);
+        const body = (await response.json().catch(() => ({})));
+        const token = body.token ?? body.access_token;
+        if (!response.ok || !token) {
+            throw new Error(`${url.host} didn't give a pull token for ${this.ref.repository} (${response.status}). The action can only pull public images.`);
+        }
+        return token;
+    }
+}
+/** Why a registry refused a manifest request, for the error. */
+function explain(response) {
+    switch (response.status) {
+        case 401:
+        case 403:
+            return ' The action can only pull public images.';
+        case 404:
+            return ' Check the image name and tag.';
+        case 429: {
+            const after = response.headers.get('retry-after');
+            return ` The registry is limiting pulls${after ? `, for ${after} seconds` : ''}.`;
+        }
+        default:
+            return '';
+    }
+}
+
+;// CONCATENATED MODULE: ./src/distro/source.ts
+
+
+/**
+ * Parses the `image` and `image-sha256` inputs. An `https://` URL needs a SHA-256, because
+ * nothing else says what the download should be. An `oci://` reference is checked against the
+ * digests its registry lists. Anything else is a path to a file, relative to the workspace.
+ */
+function parseImageSource(input, sha256Input) {
+    const value = input.trim();
+    const sha256 = parseSha256(sha256Input);
+    if (value === '') {
+        if (sha256) {
+            throw new Error('image-sha256 needs image as well.');
+        }
+        return undefined;
+    }
+    if (/^http:\/\//i.test(value)) {
+        throw new Error(`image must use https, not ${value}.`);
+    }
+    if (/^https:\/\//i.test(value)) {
+        if (!sha256) {
+            throw new Error('image is a URL, so it needs image-sha256, the SHA-256 of the file it downloads.');
+        }
+        return { kind: 'url', url: value, sha256 };
+    }
+    if (/^oci:\/\//i.test(value)) {
+        if (sha256) {
+            throw new Error("image-sha256 doesn't apply to an oci:// image, which is checked against its registry's digests. Pin it with @sha256:<digest> instead.");
+        }
+        const reference = value.slice('oci://'.length);
+        // Checked now, so a typo fails before anything changes on the runner.
+        parseOciReference(reference);
+        return { kind: 'oci', reference };
+    }
+    return { kind: 'file', path: resolveInputPath(value, 'image'), sha256 };
+}
+/** Parses a SHA-256 in hex, with or without a `sha256:` prefix. Empty means none. */
+function parseSha256(input) {
+    const value = input
+        .trim()
+        .toLowerCase()
+        .replace(/^sha256:/, '');
+    if (value === '') {
+        return undefined;
+    }
+    if (!/^[0-9a-f]{64}$/.test(value)) {
+        throw new Error(`image-sha256 must be 64 hexadecimal characters, not "${input.trim()}".`);
+    }
+    return value;
 }
 
 ;// CONCATENATED MODULE: ./src/wsl/config.ts
@@ -95923,6 +96187,8 @@ async function msiexec(args) {
 
 
 
+
+
 /** Runs the action, failing the step with a message rather than throwing. */
 async function run() {
     try {
@@ -95933,16 +96199,24 @@ async function run() {
         const request = parsePackageRequest(lib_core/* getInput */.V4('wsl-package-version'));
         const token = lib_core/* getInput */.V4('token');
         const distribution = lib_core/* getInput */.V4('distribution').trim();
+        const source = parseImageSource(lib_core/* getInput */.V4('image'), lib_core/* getInput */.V4('image-sha256'));
         const instanceName = lib_core/* getInput */.V4('instance-name').trim() || distribution;
         const wslVersion = parseWslVersion(lib_core/* getInput */.V4('wsl-version'));
         const useCache = lib_core/* getBooleanInput */.Vt('cache');
         const allowDegraded = lib_core/* getBooleanInput */.Vt('allow-degraded');
         const timeout = parseTimeout(lib_core/* getInput */.V4('cloud-init-timeout'));
         const wslconfig = checkWslConfig(parseWslConfigRequest(lib_core/* getInput */.V4('wslconfig')), lib_core/* getBooleanInput */.Vt('wslconfig-overwrite'));
-        if (distribution) {
+        if (distribution && source) {
+            throw new Error('Set distribution or image, not both.');
+        }
+        if (source && !instanceName) {
+            throw new Error('image needs instance-name, the name to register the instance under.');
+        }
+        const installing = Boolean(distribution || source);
+        if (installing) {
             checkInstanceName(instanceName);
         }
-        const seed = readSeed(distribution, instanceName, wslVersion);
+        const seed = readSeed(installing, instanceName, wslVersion);
         const version = await ensurePackage(request, token);
         const wslc = wslcPath();
         lib_core/* info */.pq(`Using WSL ${version.package} with kernel ${version.kernel}.`);
@@ -95950,18 +96224,20 @@ async function run() {
         lib_core/* setOutput */.uH('kernel-version', version.kernel);
         lib_core/* setOutput */.uH('wslc-path', wslc ?? '');
         // These need WSL, but can still fail on the inputs, so they come before .wslconfig changes.
-        const image = distribution ? await findDistribution(distribution, instanceName) : undefined;
+        const target = installing
+            ? await findTarget(distribution, source, instanceName, useCache)
+            : undefined;
         // WSL reads .wslconfig when its virtual machine starts, so it goes in before any instance does.
         await applyWslConfig(wslconfig);
-        if (!image) {
+        if (!target) {
             return;
         }
-        const download = await lib_core/* group */.Os(`Download ${image.name}`, () => downloadImage(image, useCache));
+        const download = await target.fetch();
         // cloud-init reads the seed on the instance's first boot, so it must be in place first.
         const removeSeed = seed ? placeSeed(instanceName, seed) : undefined;
         try {
             await lib_core/* group */.Os(`Install ${instanceName} as WSL ${wslVersion}`, () => installImage(instanceName, download.path, wslVersion));
-            lib_core/* info */.pq(`Installed ${image.name} as ${instanceName}, a WSL ${wslVersion} instance.`);
+            lib_core/* info */.pq(`Installed ${target.name} as ${instanceName}, a WSL ${wslVersion} instance.`);
             lib_core/* setOutput */.uH('instance-name', instanceName);
             lib_core/* setOutput */.uH('cache-hit', String(download.cacheHit));
             if (seed) {
@@ -95978,13 +96254,33 @@ async function run() {
         lib_core/* setFailed */.C1(error instanceof Error ? error.message : String(error));
     }
 }
-/** Checks the instance name is free and finds the distribution's image for this runner. */
-async function findDistribution(distribution, instanceName) {
+/**
+ * Checks the instance name is free and finds the image to install: a distribution from
+ * Microsoft's manifest, or the image input's URL, OCI image or file.
+ */
+async function findTarget(distribution, source, instanceName, useCache) {
     const existing = await listInstances();
     if (existing.some((i) => i.name.toLowerCase() === instanceName.toLowerCase())) {
         throw new Error(`The runner already has an instance named ${instanceName}. Set instance-name to another name.`);
     }
-    return findImage(await fetchManifest(), distribution, await nativeArch());
+    if (source?.kind === 'file') {
+        return { name: source.path, fetch: () => useLocalImage(source.path, source.sha256) };
+    }
+    let image;
+    if (source?.kind === 'url') {
+        const file = fileName(source.url, instanceName);
+        image = { name: source.url, url: source.url, sha256: source.sha256, fileName: file };
+    }
+    else if (source?.kind === 'oci') {
+        image = await resolveOciImage(source.reference, await nativeArch());
+    }
+    else {
+        image = findImage(await fetchManifest(), distribution, await nativeArch());
+    }
+    return {
+        name: image.name,
+        fetch: () => lib_core/* group */.Os(`Download ${image.name}`, () => downloadImage(image, useCache)),
+    };
 }
 /**
  * Runs after the job's steps, even when the job is cancelled or times out, and removes any seed
@@ -95999,7 +96295,7 @@ function post() {
     }
 }
 /** Reads the cloud-init inputs into a seed, or undefined when there's no user-data. */
-function readSeed(distribution, instance, wslVersion) {
+function readSeed(installing, instance, wslVersion) {
     const userData = lib_core/* getInput */.V4('cloud-init-user-data').trim();
     const metaData = lib_core/* getInput */.V4('cloud-init-meta-data').trim();
     if (!userData && !metaData) {
@@ -96008,8 +96304,8 @@ function readSeed(distribution, instance, wslVersion) {
     if (!userData) {
         throw new Error('cloud-init-meta-data needs cloud-init-user-data as well.');
     }
-    if (!distribution) {
-        throw new Error('cloud-init-user-data needs a distribution to provision.');
+    if (!installing) {
+        throw new Error('cloud-init-user-data needs a distribution or image to provision.');
     }
     if (wslVersion === 1) {
         throw new Error("cloud-init needs WSL 2. WSL 1 instances don't run an init system, so cloud-init never starts. Set wsl-version to 2.");

@@ -15,7 +15,7 @@ How the action downloads a distribution image and installs it as a WSL instance.
 
 ## Overview
 
-When the `distribution` input names a distribution, the action installs it after [the WSL package](wsl-package.md) is ready. It reads Microsoft's [`DistributionInfo.json`](https://raw.githubusercontent.com/microsoft/WSL/master/distributions/DistributionInfo.json), the list `wsl --list --online` shows, downloads the `.wsl` image itself and installs it with `wsl --install --from-file`. Only the manifest's `ModernDistributions`, which are `.wsl` images, can be installed. Its older `Distributions` are Microsoft Store packages, such as `OracleLinux_9_5`, and the action says so when one is asked for.
+When the `distribution` input names a distribution, the action installs it after [the WSL package](wsl-package.md) is ready. It reads Microsoft's [`DistributionInfo.json`](https://raw.githubusercontent.com/microsoft/WSL/master/distributions/DistributionInfo.json), the list `wsl --list --online` shows, downloads the `.wsl` image itself and installs it with `wsl --install --from-file`. Only the manifest's `ModernDistributions`, which are `.wsl` images, can be installed. Its older `Distributions` are Microsoft Store packages, such as `OracleLinux_9_5`, and the action says so when one is asked for. The `image` input installs other images through the same download and install steps, as [Images](images.md) describes.
 
 This sequence diagram shows one install:
 
@@ -79,13 +79,13 @@ sequenceDiagram
 
 ## Decisions
 
-- **Download the image ourselves, not with `wsl --install <name>`.** It lets the action cache the image, retry downloads and check the hash itself, and it's the same path later inputs for custom images will use.
+- **Download the image ourselves, not with `wsl --install <name>`.** It lets the action cache the image, retry downloads and check the hash itself, and the `image` input uses the same path.
 - **Fail rather than fall back to WSL 1.** `wsl-version` defaults to `2`, and a runner without virtualisation fails with an explanation. A workflow that wants WSL 1 says so, and works unchanged if the runner gains virtualisation.
 - **No runner checks.** What WSL reports decides what works, so self-hosted runners and future images need no changes.
 
 ## Limits
 
-- Only the `.wsl` distributions in Microsoft's manifest can be installed so far, not its Microsoft Store packages.
+- `distribution` installs only the `.wsl` distributions in Microsoft's manifest, not its Microsoft Store packages. `image` covers anything else.
 - The instance is registered but never started, so nothing has run inside it yet, including the distribution's first-run setup.
 - On self-hosted runners, instances stay registered after the job. A second run with the same `instance-name` fails until the instance is removed.
 - The Actions cache is limited to 10 GB a repository, and an image is 150 to 450 MB.

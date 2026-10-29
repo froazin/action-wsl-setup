@@ -25,8 +25,24 @@ inputs:
       set up WSL without installing a distribution.
     required: false
     default: ""
+  image:
+    description: >-
+      An image to install instead of a distribution from Microsoft's list: an https:// URL to a
+      .wsl or .tar.gz file, which needs image-sha256; an oci:// reference to a public image, such
+      as "oci://ghcr.io/owner/image:tag", which is checked against its registry's digests; or a
+      path to a file, relative to the workspace. Needs instance-name.
+    required: false
+    default: ""
+  image-sha256:
+    description: >-
+      The SHA-256 the image must match. Needed with a URL, optional with a file and not used with
+      an oci:// reference, which can be pinned with "@sha256:<digest>" instead.
+    required: false
+    default: ""
   instance-name:
-    description: The name to register the instance under. Defaults to the distribution's name.
+    description: >-
+      The name to register the instance under. Defaults to the distribution's name, and is needed
+      with image.
     required: false
     default: ""
   wsl-version:

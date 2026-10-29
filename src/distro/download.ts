@@ -49,20 +49,35 @@ export async function downloadImage(
   }
 
   core.info(`Downloading ${image.url}`)
-  await downloadTool(image.url, path)
+  // downloadTool sets auth afresh on each try. A shared headers object would lose it after a
+  // redirect to storage on another host, because @actions/http-client deletes it from the object.
+  await downloadTool(image.url, path, await image.authorize?.())
   const actual = await sha256(path)
   if (actual !== image.sha256) {
     rmSync(path, { force: true })
-    throw new Error(
-      `${image.fileName} has SHA-256 ${actual}, but the manifest lists ${image.sha256}.`,
-    )
+    throw new Error(`${image.fileName} has SHA-256 ${actual}, not ${image.sha256}.`)
   }
-  core.info(`${image.fileName} matches its SHA-256 in the manifest.`)
+  core.info(`${image.fileName} matches its SHA-256.`)
 
   // saveCache returns -1 when it didn't save, such as when another job is saving the same key,
   // and it has already logged why.
   if (caching && (await cache.saveCache([path], key)) !== -1) {
     core.info(`Saved ${image.fileName} to the cache.`)
+  }
+  return { path, cacheHit: false }
+}
+
+/**
+ * Uses an image file that's already on the runner, such as one an earlier step built. With a
+ * SHA-256, it checks the file first.
+ */
+export async function useLocalImage(path: string, expected?: string): Promise<DownloadedImage> {
+  if (expected) {
+    const actual = await sha256(path)
+    if (actual !== expected) {
+      throw new Error(`${path} has SHA-256 ${actual}, not ${expected}.`)
+    }
+    core.info(`${path} matches its SHA-256.`)
   }
   return { path, cacheHit: false }
 }
