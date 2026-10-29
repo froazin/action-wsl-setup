@@ -4,13 +4,18 @@ import { wsl, wslWithTimeout } from '../wsl/exe.js'
 /** How a cloud-init run ended, when it didn't fail. */
 export type CloudInitStatus = 'done' | 'degraded'
 
-/** The parts of cloud-init's result.json the action reads. */
-interface Result {
-  v1?: {
-    datasource?: string | null
-    errors?: string[]
-    recoverable_errors?: Record<string, string[]>
-  }
+/** Errors cloud-init records, by level for recoverable ones such as DEPRECATED and WARNING. */
+interface Problems {
+  errors?: string[]
+  recoverable_errors?: Record<string, string[]>
+}
+
+/** What the action reads about a cloud-init run. */
+export interface CloudInitRun {
+  /** result.json, which cloud-init writes when its last stage finishes. */
+  result?: { v1?: Problems & { datasource?: string | null } }
+  /** The output of `cloud-init status --format json`, which gathers every stage's problems. */
+  status?: Problems
 }
 
 /** Where cloud-init writes its result when its last stage finishes. */
@@ -56,41 +61,61 @@ export async function waitForCloudInit(instance: string, minutes: number): Promi
   }
 }
 
-/** Reads cloud-init's result.json, or undefined when cloud-init hasn't finished a run. */
-export async function readResult(instance: string): Promise<Result | undefined> {
+/** Reads result.json and `cloud-init status` from the instance. */
+export async function readRun(instance: string): Promise<CloudInitRun> {
   const result = await wsl(['-d', instance, '-u', 'root', '--', 'cat', RESULT], { silent: true })
-  if (result.exitCode !== 0) {
-    return undefined
+  const status = await wsl(
+    ['-d', instance, '-u', 'root', '--', 'cloud-init', 'status', '--format', 'json'],
+    {
+      silent: true,
+    },
+  )
+  return {
+    result: result.exitCode === 0 ? parseJson(result.stdout) : undefined,
+    // status exits 1 or 2 for errors and recoverable errors, and still prints the JSON.
+    status: parseJson(status.stdout),
   }
+}
+
+function parseJson<T>(output: string): T | undefined {
+  const start = output.indexOf('{')
+  const end = output.lastIndexOf('}')
   try {
-    return JSON.parse(result.stdout) as Result
+    return start === -1 ? undefined : (JSON.parse(output.slice(start, end + 1)) as T)
   } catch {
     return undefined
   }
 }
 
 /**
- * Judges a cloud-init run from its result.json, rather than `cloud-init status`: some
- * distributions turn cloud-init off after its first run, and then status says "disabled" whether
- * or not it ran (observed on Ubuntu-26.04).
+ * Judges a cloud-init run. result.json shows that a run finished and which datasource it used.
+ * Its errors don't include recoverable ones, such as deprecated keys (observed), so those come
+ * from `cloud-init status` too. status alone isn't enough: some distributions turn cloud-init off
+ * after its first run, and then it says "disabled" whether or not cloud-init ran (observed on
+ * Ubuntu-26.04).
  */
-export function judge(result: Result | undefined, allowDegraded: boolean): CloudInitStatus {
-  if (!result?.v1) {
+export function judge(run: CloudInitRun, allowDegraded: boolean): CloudInitStatus {
+  const result = run.result?.v1
+  if (!result) {
     throw new Error(
       `cloud-init didn't finish a run, so it may not have found the seed files. Its log is above.`,
     )
   }
-  const { datasource, errors = [], recoverable_errors: recoverable = {} } = result.v1
-  if (!datasource?.includes('WSL')) {
+  if (!result.datasource?.includes('WSL')) {
     throw new Error(
-      `cloud-init ran with ${datasource ?? 'no datasource'}, not the WSL datasource, so it didn't use the user-data.`,
+      `cloud-init ran with ${result.datasource ?? 'no datasource'}, not the WSL datasource, so it didn't use the user-data.`,
     )
   }
+  const errors = unique([...(result.errors ?? []), ...(run.status?.errors ?? [])])
   if (errors.length > 0) {
     throw new Error(`cloud-init failed: ${errors.join('; ')}`)
   }
-  const warnings = Object.entries(recoverable).flatMap(([level, messages]) =>
-    messages.map((message) => `${level}: ${message}`),
+  const warnings = unique(
+    [result.recoverable_errors, run.status?.recoverable_errors].flatMap((levels) =>
+      Object.entries(levels ?? {}).flatMap(([level, messages]) =>
+        messages.map((message) => `${level}: ${message}`),
+      ),
+    ),
   )
   if (warnings.length === 0) {
     return 'done'
@@ -101,6 +126,11 @@ export function judge(result: Result | undefined, allowDegraded: boolean): Cloud
   }
   core.warning(summary)
   return 'degraded'
+}
+
+/** cloud-init reports some problems more than once, so keep the first of each. */
+function unique(messages: string[]): string[] {
+  return [...new Set(messages)]
 }
 
 /** Shows cloud-init's status and output log, in a collapsed group. */
@@ -168,7 +198,7 @@ export async function provision(
   let status: CloudInitStatus
   try {
     await waitForCloudInit(instance, minutes)
-    status = judge(await readResult(instance), allowDegraded)
+    status = judge(await readRun(instance), allowDegraded)
   } finally {
     await showLogs(instance)
   }

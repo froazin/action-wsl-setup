@@ -3,7 +3,7 @@
 not_a_cloud_init_key: true
 users:
   - name: tester
-    uid: "1000"
+    uid: 1000
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
 write_files:

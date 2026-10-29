@@ -29,7 +29,7 @@ flowchart TD
     has -->|no| fail["Fail: no cloud-init in the image"]
     has -->|yes| wait["waitForCloudInit: cloud-init status --wait, with a timeout"]
     wait -->|"finished or timed out"| logs["showLogs: status and cloud-init-output.log"]
-    logs -->|"result.json"| judge{"judge: datasource, errors, recoverable errors"}
+    logs -->|"result.json and status"| judge{"judge: datasource, errors, recoverable errors"}
     judge -->|"done or allowed degraded"| restart["restart: wsl --terminate, then systemctl is-system-running"]
     judge -->|"error or degraded"| fail2["Fail with cloud-init's errors"]
     restart -->|"running"| done["cloud-init-status output"]
@@ -45,7 +45,7 @@ flowchart TD
 - **Placing the seed:** `placeSeed` refuses to replace a seed file that's already there with other content, because on a self-hosted runner it's someone else's. An identical file is reused and left in place.
 - **First boot:** `hasCloudInit` runs `command -v cloud-init` as root, which starts the instance, so systemd starts cloud-init with the seed in place. The probe found that `wsl -d <instance> -- <command>` doesn't run a distribution's first-run setup (observed).
 - **Waiting:** `waitForCloudInit` runs `cloud-init status --wait` in one `wsl.exe` process, through `wslWithTimeout`, which kills it after `cloud-init-timeout` minutes. One process keeps a client attached for the whole wait, so WSL doesn't stop the instance as idle.
-- **Judging:** `judge` reads `/var/lib/cloud/data/result.json`, which cloud-init writes when its last stage finishes. The datasource must be the WSL one, `errors` must be empty, and anything in `recoverable_errors` makes the run degraded.
+- **Judging:** `readRun` reads `/var/lib/cloud/data/result.json`, which cloud-init writes when its last stage finishes, and `cloud-init status --format json`. `judge` needs `result.json` to exist and name the WSL datasource. It takes errors and recoverable errors from both, because `result.json` leaves recoverable errors such as deprecated keys out (observed). Any error fails the run, and any recoverable error makes it degraded.
 - **Restarting:** `restart` runs `wsl --terminate`, so changes to `/etc/wsl.conf` such as the default user take effect, then runs `systemctl is-system-running --wait` when systemd is PID 1.
 
 ## Interfaces
@@ -67,7 +67,7 @@ flowchart TD
 
 ## Decisions
 
-- **Judge `result.json`, not `cloud-init status`.** After its first run, Ubuntu-26.04 turns cloud-init off, and `status` then reports `disabled-by-marker-file` whether or not it ran (observed).
+- **Judge `result.json` and `cloud-init status` together.** After its first run, Ubuntu-26.04 turns cloud-init off, and `status` then reports `disabled-by-marker-file` whether or not it ran, so only `result.json` shows a run finished. But `result.json` had no recoverable errors when `status` listed a deprecated key and a schema warning (both observed).
 - **Fail when the image has no cloud-init.** FedoraLinux-44's image has none (observed). Installing it before the first boot would make the action depend on each distribution's package manager, so the user chose to fail instead.
 - **Fail on degraded by default.** A degraded run usually means user-data that needs fixing, such as a deprecated key. `allow-degraded` covers both cloud-init and systemd.
 - **Don't run the distribution's first-run setup.** cloud-init and its `wsl.conf` decide the default user.

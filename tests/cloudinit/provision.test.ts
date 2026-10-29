@@ -23,45 +23,76 @@ describe('parseTimeout', () => {
 })
 
 describe('judge', () => {
+  const finished = (extra = {}) => ({ result: { v1: { ...WSL, errors: [], ...extra } } })
+
   it('passes a clean run', () => {
-    expect(judge({ v1: { ...WSL, errors: [], recoverable_errors: {} } }, false)).toBe('done')
+    expect(judge({ ...finished(), status: { errors: [], recoverable_errors: {} } }, false)).toBe(
+      'done',
+    )
   })
 
   it('fails when cloud-init never finished a run', () => {
-    expect(() => judge(undefined, false)).toThrow(/didn't finish a run/)
+    expect(() => judge({ status: { errors: [] } }, false)).toThrow(/didn't finish a run/)
   })
 
   it('fails when cloud-init used another datasource', () => {
-    expect(() => judge({ v1: { datasource: 'DataSourceNone', errors: [] } }, false)).toThrow(
+    expect(() => judge({ result: { v1: { datasource: 'DataSourceNone' } } }, false)).toThrow(
       /ran with DataSourceNone, not the WSL datasource/,
     )
   })
 
-  it('fails with the errors', () => {
-    const result = { v1: { ...WSL, errors: ['runcmd failed', 'boom'] } }
-    expect(() => judge(result, true)).toThrow('cloud-init failed: runcmd failed; boom')
+  it('fails with the errors from both, once each', () => {
+    const run = {
+      ...finished({ errors: ['runcmd failed'] }),
+      status: { errors: ['runcmd failed', 'boom'] },
+    }
+    expect(() => judge(run, true)).toThrow('cloud-init failed: runcmd failed; boom')
   })
 
-  it('fails a degraded run by default', () => {
-    const result = { v1: { ...WSL, errors: [], recoverable_errors: { WARNING: ['old key'] } } }
-    expect(() => judge(result, false)).toThrow(/degraded: WARNING: old key.*allow-degraded/)
+  // Observed on Ubuntu-26.04: result.json had no recoverable errors, but status listed each twice.
+  const deprecated = {
+    ...finished(),
+    status: {
+      errors: [],
+      recoverable_errors: {
+        DEPRECATED: ['users.0.uid is a string', 'users.0.uid is a string'],
+        WARNING: ['cloud-config failed schema validation!'],
+      },
+    },
+  }
+
+  it('fails a run that only status reports as degraded', () => {
+    expect(() => judge(deprecated, false)).toThrow(
+      'cloud-init finished degraded: DEPRECATED: users.0.uid is a string; WARNING: cloud-config failed schema validation!. Set allow-degraded to true to accept that.',
+    )
   })
 
   it('accepts a degraded run with a warning when allowed', () => {
-    const result = { v1: { ...WSL, recoverable_errors: { DEPRECATED: ['old key'] } } }
-    expect(judge(result, true)).toBe('degraded')
-    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/DEPRECATED: old key/))
+    expect(judge(deprecated, true)).toBe('degraded')
+    expect(core.warning).toHaveBeenCalledWith(expect.stringMatching(/DEPRECATED: users\.0\.uid/))
+  })
+
+  it('reads recoverable errors from result.json too', () => {
+    const run = finished({ recoverable_errors: { WARNING: ['old key'] } })
+    expect(() => judge(run, false)).toThrow(/WARNING: old key/)
   })
 })
 
 describe('provision', () => {
   /** What each kind of command in the instance returns. */
-  let responses: { commandV: WslResult; result: WslResult; systemd: string; failed: WslResult }
+  let responses: {
+    commandV: WslResult
+    result: WslResult
+    status: WslResult
+    systemd: string
+    failed: WslResult
+  }
 
   beforeEach(() => {
     responses = {
       commandV: { exitCode: 0, stdout: '/usr/bin/cloud-init\n' },
       result: { exitCode: 0, stdout: JSON.stringify({ v1: { ...WSL, errors: [] } }) },
+      status: { exitCode: 0, stdout: JSON.stringify({ status: 'disabled', errors: [] }) },
       systemd: 'running\n',
       failed: { exitCode: 0, stdout: '0 loaded units listed.\n' },
     }
@@ -70,6 +101,7 @@ describe('provision', () => {
       const command = args.join(' ')
       if (command.includes('command -v cloud-init')) return responses.commandV
       if (command.includes('result.json')) return responses.result
+      if (command.includes('--format json')) return responses.status
       if (command.includes('systemctl --failed')) return responses.failed
       return { exitCode: 0, stdout: '' }
     })
@@ -111,6 +143,14 @@ describe('provision', () => {
     await expect(provision('ci', 15, false)).rejects.toThrow('cloud-init failed: runcmd failed')
     expect(core.group).toHaveBeenCalledWith('cloud-init log for ci', expect.any(Function))
     expect(wsl).not.toHaveBeenCalledWith(['--terminate', 'ci'])
+  })
+
+  it('fails when status reports a degraded run, although it exits 2', async () => {
+    responses.status = {
+      exitCode: 2,
+      stdout: JSON.stringify({ errors: [], recoverable_errors: { DEPRECATED: ['old key'] } }),
+    }
+    await expect(provision('ci', 15, false)).rejects.toThrow(/DEPRECATED: old key/)
   })
 
   it('fails when systemd is degraded after the restart', async () => {

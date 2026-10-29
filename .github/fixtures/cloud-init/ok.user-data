@@ -2,7 +2,7 @@
 # Creates a user, makes it the default and turns on systemd. The end-to-end tests check each.
 users:
   - name: tester
-    uid: "1000"
+    uid: 1000
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
 write_files:
