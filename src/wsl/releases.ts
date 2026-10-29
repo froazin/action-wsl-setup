@@ -1,4 +1,4 @@
-import { setTimeout as sleep } from 'node:timers/promises'
+import { get } from '../http.js'
 
 /** A WSL package release on GitHub, with the MSI for one architecture. */
 export interface WslRelease {
@@ -99,7 +99,7 @@ export async function findRelease(
     headers.Authorization = `Bearer ${token}`
   }
   const url = `https://api.github.com/repos/${REPO}/releases/${path}`
-  const response = await get(url, headers)
+  const response = await get(url, headers, 'the WSL release')
   if (response.status === 404 && request.kind === 'exact') {
     throw new Error(
       `WSL release ${request.tag} doesn't exist. See https://github.com/${REPO}/releases.`,
@@ -109,32 +109,4 @@ export async function findRelease(
     throw new Error(`Couldn't look up the WSL release: ${url} returned ${response.status}.`)
   }
   return toWslRelease((await response.json()) as GitHubRelease, arch)
-}
-
-/**
- * Fetches a URL, trying up to three times when the request fails or GitHub returns a server
- * error, and giving each try 30 seconds.
- */
-async function get(url: string, headers: Record<string, string>): Promise<Response> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      const response = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) })
-      if (response.status < 500 || attempt === 3) {
-        return response
-      }
-    } catch (error) {
-      if (attempt === 3) {
-        throw new Error(`Couldn't look up the WSL release at ${url}: ${describe(error)}`)
-      }
-    }
-    await sleep(2000 * attempt)
-  }
-}
-
-/** An error's message, with its cause, which holds the reason when fetch fails. */
-function describe(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error)
-  }
-  return error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error.message
 }

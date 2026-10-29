@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, existsSync, readFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import * as core from '@actions/core'
 import { exec } from '@actions/exec'
 import { downloadTool } from '@actions/tool-cache'
+import { sha256 } from '../hash.js'
 import { nativeArch, packageDir, parseVersion, type WslVersion, wsl } from './exe.js'
 import { findRelease, isRelease, type PackageRequest, type WslRelease } from './releases.js'
 
@@ -122,12 +123,4 @@ async function msiexec(args: string[]): Promise<number> {
     core.info('Another installation is in progress, so msiexec will try again in 15 seconds.')
     await sleep(15_000)
   }
-}
-
-async function sha256(path: string): Promise<string> {
-  const hash = createHash('sha256')
-  for await (const chunk of createReadStream(path)) {
-    hash.update(chunk as Buffer)
-  }
-  return hash.digest('hex')
 }
