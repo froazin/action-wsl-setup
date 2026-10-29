@@ -13,15 +13,16 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 | Path | Holds |
 | --- | --- |
 | `action.yml` | The action's metadata: name, inputs, outputs and the `node24` entry point |
-| `src/` | The TypeScript source. `index.ts` is the entry point ncc bundles, and `main.ts` holds `run()` |
+| `src/` | The TypeScript source. `index.ts` is the entry point ncc bundles, for both the main and the post step, and `main.ts` holds `run()` and `post()` |
 | `src/wsl/` | Running `wsl.exe`, and finding and installing the WSL package. Before you change it, read [docs/wsl-package.md](docs/wsl-package.md) |
 | `src/distro/` | Finding, downloading, caching and installing distribution images. Before you change it, read [docs/distributions.md](docs/distributions.md) |
+| `src/cloudinit/` | Placing cloud-init seed files, waiting for cloud-init and judging the result. Before you change it, read [docs/cloud-init.md](docs/cloud-init.md) |
 | `src/http.ts`, `src/hash.ts` | Shared helpers: fetching with retries, and a file's SHA-256 |
 | `tests/` | Vitest unit tests, one `<module>.test.ts` per module in `src/` |
 | `dist/` | The bundle runners execute, built by `npm run build`. Never edit it by hand |
 | `docs/` | Design docs, one per part of the action |
 | `.github/workflows/` | CI. `ci.yml` lints, tests and checks that `dist/` is up to date. `e2e.yml` runs the action on the hosted Windows images |
-| `.github/scripts/` | PowerShell scripts the end-to-end jobs use to check what the action did |
+| `.github/scripts/`, `.github/fixtures/` | PowerShell scripts and cloud-init user-data the end-to-end jobs use |
 
 ## Conventions
 

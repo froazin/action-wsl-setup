@@ -37,6 +37,21 @@ Instances are WSL 2 unless you set `wsl-version: 1`. WSL 2 needs virtualisation,
 
 Call the action once for each instance you need. Give each one its own `instance-name` when they come from the same distribution.
 
+### Provisioning with cloud-init
+
+Give the action cloud-init user-data, and it provisions the instance on its first boot:
+
+```yaml
+      - uses: froazin/action-wsl-setup@main
+        with:
+          distribution: Ubuntu-26.04
+          cloud-init-user-data: ci/Ubuntu-26.04.user-data
+```
+
+The action puts the user-data, and meta-data if you give it, in `%USERPROFILE%\.cloud-init` before the instance first starts. It then waits for cloud-init, shows cloud-init's log and fails the step if cloud-init failed. Afterwards it restarts the instance, so changes cloud-init made to `/etc/wsl.conf`, such as the default user, take effect, and checks systemd started cleanly. It removes the seed files it wrote, and its post step removes them if the job is cancelled or times out first.
+
+cloud-init needs WSL 2 and a distribution whose image includes it, such as `Ubuntu-26.04`. `FedoraLinux-44`'s image doesn't include it. If a seed file for the instance is already in `%USERPROFILE%\.cloud-init` with other content, the action fails rather than replace it.
+
 > [!IMPORTANT]
 > A job that uses WSL can occasionally freeze the runner, and then step timeouts don't fire. Set `timeout-minutes` on the job.
 
@@ -50,6 +65,10 @@ Call the action once for each instance you need. Give each one its own `instance
 | `instance-name` | The distribution's name | The name to register the instance under. The job fails if an instance already has that name |
 | `wsl-version` | `2` | The instance's WSL version, `1` or `2`. The action never falls back from 2 to 1 |
 | `cache` | `true` | Keep downloaded distribution images in the Actions cache |
+| `cloud-init-user-data` | Empty | Path to cloud-init user-data for the instance's first boot, relative to the workspace |
+| `cloud-init-meta-data` | Empty | Path to cloud-init meta-data. Without it, the action writes meta-data with `instance-id` set to the instance's name |
+| `cloud-init-timeout` | `15` | Minutes to wait for cloud-init before failing, above 0 and up to 35791 |
+| `allow-degraded` | `false` | Accept cloud-init finishing with recoverable errors, such as a deprecated key, or systemd starting with failed units, with a warning instead of failing |
 
 ### Outputs
 
@@ -60,13 +79,13 @@ Call the action once for each instance you need. Give each one its own `instance
 | `wslc-path` | The path to `wslc.exe`, WSL's container command-line tool, which comes with WSL 3.0.1 and later. Empty when the package doesn't have it |
 | `instance-name` | The installed instance's name. Empty without a `distribution` |
 | `cache-hit` | `true` when the distribution image came from the Actions cache, otherwise `false` |
+| `cloud-init-status` | `done`, or `degraded` when `allow-degraded` let a degraded run through. Empty without user-data |
 
 ## Planned
 
 The action will also:
 
 - install a distribution from a URL or OCI image
-- provision it with cloud-init user-data and meta-data, and wait for cloud-init to finish
 
 ## Development
 
@@ -74,6 +93,7 @@ The action is written in TypeScript and bundled into JavaScript with ncc. [CONTR
 
 - [WSL package](docs/wsl-package.md): finding, installing and pinning the WSL package
 - [Distributions](docs/distributions.md): downloading, caching and installing distribution images
+- [cloud-init](docs/cloud-init.md): seeding, waiting for and judging cloud-init
 
 ## Licence
 

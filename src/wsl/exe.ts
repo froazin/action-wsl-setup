@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { getExecOutput } from '@actions/exec'
@@ -35,6 +36,38 @@ export async function wsl(args: string[], options: { silent?: boolean } = {}): P
     silent: options.silent ?? false,
   })
   return { exitCode: result.exitCode, stdout: clean(result.stdout + result.stderr) }
+}
+
+/** The output of a wsl.exe run that can time out. */
+export interface TimedWslResult extends WslResult {
+  timedOut: boolean
+}
+
+/**
+ * Runs the WSL package's wsl.exe like `wsl()`, but kills it after `timeoutMs`. Use it for
+ * commands that can wait for a long time, such as `cloud-init status --wait`. Its output isn't
+ * shown in the log as it runs.
+ */
+export function wslWithTimeout(args: string[], timeoutMs: number): Promise<TimedWslResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(join(packageDir(), 'wsl.exe'), args, {
+      env: { ...process.env, WSL_UTF8: '1' },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: timeoutMs,
+      windowsHide: true,
+    })
+    const chunks: Buffer[] = []
+    child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
+    child.stderr.on('data', (chunk: Buffer) => chunks.push(chunk))
+    child.on('error', reject)
+    child.on('close', (code, signal) => {
+      resolve({
+        exitCode: code ?? -1,
+        stdout: clean(Buffer.concat(chunks).toString('utf8')),
+        timedOut: signal !== null,
+      })
+    })
+  })
 }
 
 /**

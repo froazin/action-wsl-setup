@@ -1,0 +1,4 @@
+#cloud-config
+# A command that fails, so cloud-init reports an error.
+runcmd:
+  - "false"
