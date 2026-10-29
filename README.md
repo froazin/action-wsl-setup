@@ -69,7 +69,7 @@ Give the action cloud-init user-data, and it provisions the instance on its firs
 
 The action puts the user-data, and meta-data if you give it, in `%USERPROFILE%\.cloud-init` before the instance first starts. It then waits for cloud-init, shows cloud-init's log and fails the step if cloud-init failed. Afterwards it restarts the instance, so changes cloud-init made to `/etc/wsl.conf`, such as the default user, take effect, and checks systemd started cleanly. It removes the seed files it wrote, and its post step removes them if the job is cancelled or times out first.
 
-cloud-init needs WSL 2 and a distribution whose image includes it, such as `Ubuntu-26.04`. `FedoraLinux-44`'s image doesn't include it. If a seed file for the instance is already in `%USERPROFILE%\.cloud-init` with other content, the action fails rather than replace it.
+cloud-init needs WSL 2 and an image that includes it, such as `Ubuntu-26.04`'s. If the instance has no cloud-init, the action fails rather than install it. If a seed file for the instance is already in `%USERPROFILE%\.cloud-init` with other content, the action fails rather than replace it.
 
 ### .wslconfig
 
