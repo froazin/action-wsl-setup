@@ -21,7 +21,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 | `tests/` | Vitest unit tests, one `<module>.test.ts` per module in `src/` |
 | `dist/` | The bundle runners execute, built by `npm run build`. Git ignores it on `main`. The release workflow builds it and commits it to the release branches |
 | `docs/` | Design docs, one per part of the action |
-| `.github/workflows/` | CI and releases. `ci.yml` and `pull-request.yml` run on pull requests. Before you change them, read [docs/ci.md](docs/ci.md). `release.yml`, `e2e.yml` and `wiki.yml` test `main`, release it and update the wiki. Before you change them, read [docs/releases.md](docs/releases.md) |
+| `.github/workflows/` | CI and releases. `ci.yml`, which calls `e2e.yml`, and `pull-request.yml` run on pull requests. Before you change them, read [docs/ci.md](docs/ci.md). `release.yml`, `e2e.yml` and `wiki.yml` test `main`, release it and update the wiki. Before you change them, read [docs/releases.md](docs/releases.md) |
 | `.github/scripts/`, `.github/fixtures/` | PowerShell scripts, and the cloud-init user-data and `.wslconfig` files the end-to-end jobs use |
 | `.github/dependabot.yml` | The weekly dependency updates. See [Dependabot](docs/releases.md#dependabot) |
 | `REVIEW.md` | Instructions for CI's Claude code review: what counts as Important, the Nit cap, what to skip, what to always check and the evidence a finding needs |
@@ -51,6 +51,6 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 - **Commit scopes:** `wsl`, `distro`, `cloud-init`, `tooling`, `ci`, `deps`, `docs`, `claude`.
 - **Feature flags:** none yet.
 - **Releases:** `release.yml` runs every night. It tests `main` and releases when the built `dist/` or `action.yml` differ from the last release. Each release is a commit on the major version's branch, such as `release/v0`, with `dist/` added, tagged `vX.Y.Z`, with release notes Claude writes. The tags hold the version, in alpha until a maintainer releases `0.1.0` by hand. Don't tag a release, or push to a release branch, yourself. See [docs/releases.md](docs/releases.md).
-- **CI:** `ci.yml` and `pull-request.yml` on every PR to `main`, and the lint, unit and end-to-end tests on `main` before each release. See [docs/ci.md](docs/ci.md).
+- **CI:** `ci.yml` and `pull-request.yml` on every PR to `main`, with the end-to-end tests when a PR could change what runners execute, and the lint, unit and end-to-end tests on `main` again before each release. See [docs/ci.md](docs/ci.md).
 - **Build and test:** see [CONTRIBUTING.md](CONTRIBUTING.md).
 - User docs live in the wiki, which `wiki.yml` keeps in step with each release. `README.md` is the entry point, which GitHub Marketplace shows. It still holds the full usage docs until the first release's wiki is written from them. Then it's planned to shrink to a quick start with links to the wiki's pages.

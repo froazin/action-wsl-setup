@@ -1,6 +1,6 @@
 # CI
 
-How the GitHub Actions workflows check a pull request (PR): the lint and unit tests, Claude's code review, and the title and description check. It's for engineers who change a workflow, or want to know why a PR can't merge. How `main` is tested and released is in [releases.md](releases.md). The commands CI runs are in [Building and testing](../CONTRIBUTING.md#building-and-testing).
+How the GitHub Actions workflows check a pull request (PR): the lint and unit tests, the end-to-end tests, Claude's code review and the title and description check. It's for engineers who change a workflow, or want to know why a PR can't merge. How `main` is tested and released is in [releases.md](releases.md). The commands CI runs are in [Building and testing](../CONTRIBUTING.md#building-and-testing).
 
 ## Contents
 
@@ -21,13 +21,16 @@ Two workflows in [.github/workflows/](../.github/workflows/) run on every PR to 
 ```mermaid
 flowchart LR
     accTitle: The workflows that run on a pull request
-    accDescr: A pull request to main starts two workflows. In ci.yml, the changes job decides whether code changed. The checks job runs the lint, type check, unit tests and build when it did. The code-review job runs Claude Sonnet when the checks passed or weren't needed, and comments on the pull request. The result job fails unless every job passed or was skipped. pull-request.yml runs Claude Haiku on the title and description. Once both checks pass and every thread is resolved, a maintainer merges the pull request.
+    accDescr: A pull request to main starts two workflows. In ci.yml, the changes job decides whether code changed. The checks job runs the lint, type check, unit tests and build when it did. When the checks pass and the change could affect what runners execute, the e2e job runs the end-to-end tests on Windows runners. The code-review job runs Claude Sonnet when those passed or weren't needed, and comments on the pull request. The result job fails unless every job passed or was skipped. pull-request.yml runs Claude Haiku on the title and description. Once both checks pass and every thread is resolved, a maintainer merges the pull request.
     pr[Pull request to main] --> changes[ci.yml: changes]
     changes -->|code changed| checks[checks: lint, types, tests, build]
+    checks -->|passed, and what runners execute could change| e2e[e2e: end-to-end tests]
     checks -->|passed or skipped| review[code-review: Claude Sonnet]
+    e2e -->|passed or skipped| review
     review -->|a comment per finding| threads[Review threads]
     changes --> result[result: CI result]
     checks --> result
+    e2e --> result
     review --> result
     pr --> title[pull-request.yml: Claude Haiku]
     result -->|passed| merge[Squash merge by a maintainer]
@@ -40,9 +43,12 @@ flowchart LR
 ### ci.yml
 
 - `concurrency` cancels a run when a newer commit reaches the same PR. It runs on `opened`, `synchronize`, `reopened` and `ready_for_review`.
-- **`changes`** lists the PR's files through the GitHub API. It outputs `code=false` only when every file is Markdown or under a path in its `DOCS` list, such as `docs/`. Listing what's safe to skip, rather than what needs testing, means a new kind of file is tested until someone adds it there. The API lists at most 3000 files, so a longer PR counts as changing code.
+- **`changes`** lists the PR's files through the GitHub API. The API lists at most 3000 files, so a longer PR counts as changing everything.
+  - It outputs `code=false` only when every file is Markdown or under a path in its `DOCS` list, such as `docs/`. Listing what's safe to skip, rather than what needs testing, means a new kind of file is tested until someone adds it there.
+  - It outputs `e2e=true` when a file is under a path in its `E2E` list: what runners execute (`src/` and `action.yml`), how it's built (the npm and TypeScript config) and the workflows, scripts and fixtures the end-to-end tests use. A change only to tests or docs skips them.
 - **`checks`** runs Biome, `tsc`, Vitest and the build. `dist/` isn't committed, so the build only shows that it works.
-- **`code-review`** runs when `changes` passed and `checks` passed or was skipped, so no tokens go on code that's known to be broken. It skips drafts and Dependabot's PRs. See [Code review](#code-review).
+- **`e2e`** calls [e2e.yml](../.github/workflows/e2e.yml) on the PR's merge commit, once `checks` passes. It builds `dist/` once and runs the action on the `windows-2025`, `windows-2022` and `windows-11-arm` runners, and on Linux to check it fails cleanly. [releases.md](releases.md#how-it-works) describes the jobs.
+- **`code-review`** runs when `changes` passed and `checks` and `e2e` passed or were skipped, so no tokens go on code that's known to be broken. It skips drafts and Dependabot's PRs. See [Code review](#code-review).
 - **`result`** runs with `if: always()` and fails unless every job it needs passed or was skipped. It's the one check to look at before merging, so a skipped job never holds a PR back and a failed one always does.
 
 The workflow always runs, rather than filtering paths in `on:`, so `CI result` reports on every PR. A workflow skipped by a path filter reports nothing, which would block the PR if the check were ever required.
@@ -50,7 +56,6 @@ The workflow always runs, rather than filtering paths in `on:`, so `CI result` r
 ### pull-request.yml
 
 Runs on `edited` as well, so a new title or description is checked again without rerunning the tests. See [Title and description](#title-and-description).
-
 
 ## Code review
 
@@ -91,10 +96,10 @@ The squash-merged commit's message comes from the PR's title and description, an
 ## Decisions
 
 - **One gate job.** `CI result` sums up every job, so there's one check to read before merging.
-- **The code review after the checks.** No tokens go on code that doesn't build or pass its tests. The end-to-end tests don't run on PRs, so the review doesn't wait for them.
+- **The code review after the tests.** No tokens go on code that doesn't build or pass its tests, end-to-end included.
 - **Resolved threads, not a failing check.** A wrong finding is resolved with a reply rather than a re-run. That's why Nits are capped.
 - **The title check in its own workflow.** Editing a title fires `edited`, which in `ci.yml` would cancel and rerun the tests.
-- **No review of Dependabot's PRs.** They only change dependencies, which the checks and the end-to-end tests on `main` cover.
+- **No review of Dependabot's PRs.** They only change dependencies, which the checks and the end-to-end tests cover.
 - **No required status checks.** A maintainer reads the checks before merging, so the ruleset doesn't require them.
 
 ## Limits

@@ -42,7 +42,7 @@ Every job works on the run's commit, `GITHUB_SHA`, so a PR merged during the run
 - **`release`** commits the tested `dist/` to the release branch and tags it. See [Release branches](#release-branches).
 - **`wiki`** calls [wiki.yml](../.github/workflows/wiki.yml). See [Wiki](#wiki).
 
-`concurrency` lets one run at a time, so a run started by hand can't race the nightly one. The end-to-end tests can also run by hand on any branch, with `gh workflow run e2e.yml --ref <branch>`.
+`concurrency` lets one run at a time, so a run started by hand can't race the nightly one. The end-to-end tests also run on PRs, as [ci.md](ci.md) describes, and by hand on any branch, with `gh workflow run e2e.yml --ref <branch>`.
 
 ## Release branches
 
@@ -99,7 +99,7 @@ The wiki at `https://github.com/froazin/action-wsl-setup/wiki` is the user guide
 
 - **Nightly, not on every merge.** Several merges become one release, and Dependabot's updates ship the morning after they merge.
 - **`dist/` on release branches, not `main`.** No PR, Dependabot's included, has to rebuild `dist/`, and what's released is exactly what the end-to-end tests ran.
-- **The end-to-end tests on `main`, not on PRs.** They keep PRs fast. A broken `main` holds back the release until a fix merges.
+- **The end-to-end tests on `main` as well as on PRs.** A PR's run tests it alone. The nightly run tests PRs that passed apart but merged together, and builds the exact `dist/` it releases. A broken `main` holds back the release until a fix merges.
 - **The wiki from the release workflow.** A release made with the workflow's token doesn't start `on: release` workflows, and the Claude action doesn't support the `release` event.
 
 ## Limits

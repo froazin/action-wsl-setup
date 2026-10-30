@@ -27,6 +27,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.paths.outputs.code }}
+      e2e: ${{ steps.paths.outputs.e2e }}
     steps:
       - name: Check which paths the pull request changes
         id: paths
@@ -37,6 +38,20 @@ jobs:
             // List what's safe to skip rather than what needs testing, so a new kind of file is tested until it's added here.
             // Keep it in step with DOCS in release.yml, which decides whether main needs the end-to-end tests.
             const DOCS = ['.claude/', '.github/dependabot.yml', 'LICENSE', 'docs/'];
+            // The end-to-end tests only need a change to what runners execute, how it's built, or the e2e workflow and its files.
+            const E2E = [
+              '.gitattributes',
+              '.github/fixtures/',
+              '.github/scripts/',
+              '.github/workflows/',
+              '.npmrc',
+              '.nvmrc',
+              'action.yml',
+              'package-lock.json',
+              'package.json',
+              'src/',
+              'tsconfig.json',
+            ];
             const under = (p, list) => list.some((s) => (s.endsWith('/') ? p.startsWith(s) : p === s));
 
             const files = await github.paginate(github.rest.pulls.listFiles, {
@@ -50,9 +65,12 @@ jobs:
             // The API lists at most 3000 files, so a longer list may be missing changes. Test everything then.
             const truncated = files.length < context.payload.pull_request.changed_files;
             const code = truncated || paths.some((p) => !(p.endsWith('.md') || under(p, DOCS)));
+            const e2e = truncated || paths.some((p) => under(p, E2E));
 
             core.info(code ? 'The pull request changes code, so the checks run.' : 'The pull request only changes docs, so the checks are skipped.');
+            core.info(e2e ? 'The pull request could change what runners execute, so the end-to-end tests run.' : "The pull request can't change what runners execute, so the end-to-end tests are skipped.");
             core.setOutput('code', String(code));
+            core.setOutput('e2e', String(e2e));
 
   checks:
     name: Lint, test and build
@@ -87,19 +105,33 @@ jobs:
       - name: Build dist
         run: npm run build
 
-  code-review:
-    name: Code review
-    # Only code that passed the checks, or didn't need them, is reviewed, so no tokens go on code that's known to be broken.
-    # Drafts aren't reviewed until they're ready. A Dependabot PR only changes dependencies, which the checks cover.
+  # Only code that passes the checks reaches the Windows runners. HEAD is the merge commit GitHub makes for the PR.
+  e2e:
+    name: End-to-end
     needs:
       - changes
       - checks
+    if: needs.changes.outputs.e2e == 'true'
+    uses: ./.github/workflows/e2e.yml
+    with:
+      ref: ${{ github.sha }}
+
+  code-review:
+    name: Code review
+    # Only code that passed the checks and the end-to-end tests, or didn't need them, is reviewed, so no tokens go on code
+    # that's known to be broken. Drafts aren't reviewed until they're ready. A Dependabot PR only changes dependencies, which
+    # the tests cover.
+    needs:
+      - changes
+      - checks
+      - e2e
     if: >-
       ${{ !cancelled()
       && !github.event.pull_request.draft
       && github.event.pull_request.user.login != 'dependabot[bot]'
       && needs.changes.result == 'success'
-      && contains(fromJSON('["success", "skipped"]'), needs.checks.result) }}
+      && contains(fromJSON('["success", "skipped"]'), needs.checks.result)
+      && contains(fromJSON('["success", "skipped"]'), needs.e2e.result) }}
     runs-on: *runs-on
     # pull-requests: write for Claude's comments, and actions: read to count the earlier reviews.
     permissions:
@@ -294,7 +326,7 @@ jobs:
             3. Check each finding against the code before you post it. Drop any you can't back with evidence.
             4. Post each finding with `mcp__github_inline_comment__create_inline_comment`.
 
-            CI has already run the lint, type check, unit tests and build, and they passed. The end-to-end tests run on main before each release, not on pull requests. A separate check reviews the pull request's title and description, so don't report on them.
+            CI has already run the lint, type check, unit tests and build and, when the change could affect what runners execute, the end-to-end tests on Windows runners, and they passed. A separate check reviews the pull request's title and description, so don't report on them.
 
             ## What to report
 
@@ -332,6 +364,7 @@ jobs:
     needs:
       - changes
       - checks
+      - e2e
       - code-review
     if: always()
     runs-on: *runs-on

@@ -49,7 +49,7 @@ A maintainer reviews and squash-merges every PR once `CI result` and `PR title a
 
 Every PR to `main` runs the checks in [docs/ci.md](docs/ci.md): lint, type check, unit tests and the build, then a code review by Claude. A separate check reviews the title and description. Changes only to docs skip the tests.
 
-The end-to-end tests run the action on the hosted Windows runners. They run on `main` every night, before any release, as [docs/releases.md](docs/releases.md) describes. To test a branch before it merges, run them by hand:
+The end-to-end tests run the action on the hosted Windows runners. They run on a PR after the lint and unit tests, when it could change what runners execute, and on `main` again before each release, as [docs/releases.md](docs/releases.md) describes. To test a branch without a PR, run them by hand:
 
 ```bash
 gh workflow run e2e.yml --ref <branch>

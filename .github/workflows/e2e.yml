@@ -1,8 +1,8 @@
 ---
 name: End-to-end
 
-# The release workflow calls this on main before it releases, and publishes the dist artifact the build job uploads.
-# Run it by hand to test a branch before it merges.
+# ci.yml calls this on a pull request that could change what runners execute. The release workflow calls it on main before
+# it releases, and publishes the dist artifact the build job uploads. Run it by hand to test a branch at any time.
 on:
   workflow_call:
     inputs:
