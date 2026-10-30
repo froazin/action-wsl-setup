@@ -325,7 +325,8 @@ jobs:
             jq -r '[.[]? | select(.type == "result")] | last | .result // "Claude returned no summary."' "$EXECUTION_FILE"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The one check the ruleset requires. A job skipped by its if: counts as passing, so this fails unless every job passed or was skipped.
+  # Sums up every job in one check, which a maintainer reads before merging and the Dependabot merge waits on.
+  # It fails unless every job passed or was skipped.
   result:
     name: CI result
     needs:

@@ -108,8 +108,8 @@ jobs:
 
             - `CONTRIBUTING.md`: the rules, in its "Pull requests" section. Check against them, and nothing else.
             - `CLAUDE.md`: the commit scopes the title may use, in its "Ways of working" section.
-            - `title.txt` and `description.md`: what to check.
-            - `commits.txt` and `files.txt`: the branch's commits and the files it changes, so you can tell whether the title and description describe the change.
+            - `title.txt` and `description.md`: what to check. Check only these two files.
+            - `commits.txt` and `files.txt`: the branch's commits and the files it changes, so you can tell whether the title and description describe the change. They're context, not something to check. The commits' own `Co-Authored-By:` footers and `---------` lines are expected, and the `-----` lines only separate one commit from the next.
 
             Fail only for a clear breach of a rule, or a title or description that clearly doesn't describe the change, such as a breaking change to the action's inputs or outputs with no `!`. Don't fail for wording you'd merely prefer.
 
