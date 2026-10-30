@@ -1,0 +1,31 @@
+{
+  "name": "action-wsl-setup",
+  "description": "Set up WSL on a GitHub hosted Windows runner.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^24.14.1 || >=25.7.0",
+    "npm": ">=11.10.0"
+  },
+  "scripts": {
+    "build": "ncc build src/index.ts --out dist --source-map --license licenses.txt",
+    "check": "biome ci .",
+    "fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@actions/cache": "^6.3.0",
+    "@actions/core": "^3.0.1",
+    "@actions/exec": "^3.0.0",
+    "@actions/tool-cache": "^4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.2",
+    "@types/node": "^24.19.2",
+    "@vercel/ncc": "^0.45.0",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  }
+}

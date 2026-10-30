@@ -1,0 +1,113 @@
+name: Set up WSL
+description: Set up WSL on a GitHub hosted or self-hosted Windows runner.
+author: froazin
+branding:
+  icon: terminal
+  color: blue
+inputs:
+  wsl-package-version:
+    description: >-
+      The WSL package to use. Leave it empty to use the runner's package, or install the newest
+      release when the runner has none. Use "latest" for the newest release, or a release such as
+      "3.0.3" to install exactly that one.
+    required: false
+    default: ""
+  token:
+    description: >-
+      A GitHub token for looking up WSL releases on github.com, which avoids the API's
+      unauthenticated rate limit.
+    required: false
+    default: ${{ github.token }}
+  distribution:
+    description: >-
+      The distribution to install, by its name in "wsl --list --online", such as "Ubuntu-26.04".
+      Distributions published only as Microsoft Store packages aren't supported. Leave it empty to
+      set up WSL without installing a distribution.
+    required: false
+    default: ""
+  image:
+    description: >-
+      An image to install instead of a distribution from Microsoft's list: an https:// URL to a
+      .wsl or .tar.gz file; an oci:// reference to a public image, such as
+      "oci://ghcr.io/owner/image:tag", which is checked against its registry's digests; or a path
+      to a file, relative to the workspace. Needs instance-name.
+    required: false
+    default: ""
+  image-sha256:
+    description: >-
+      The SHA-256 a URL or file must match. Without it, the image is installed unchecked, with a
+      warning, and a URL isn't cached. Not used with an oci:// reference, which can be pinned with
+      "@sha256:<digest>" instead.
+    required: false
+    default: ""
+  instance-name:
+    description: >-
+      The name to register the instance under. Defaults to the distribution's name, and is needed
+      with image.
+    required: false
+    default: ""
+  wsl-version:
+    description: >-
+      The instance's WSL version, 1 or 2. WSL 2 needs virtualisation, which some runners, such as
+      windows-11-arm, don't have, so set 1 there.
+    required: false
+    default: "2"
+  cache:
+    description: Keep downloaded distribution images in the Actions cache, "true" or "false".
+    required: false
+    default: "true"
+  cloud-init-user-data:
+    description: >-
+      Path to cloud-init user-data for the instance's first boot, relative to the workspace. The
+      action waits for cloud-init to finish and fails if it fails. Needs a distribution whose
+      image includes cloud-init, and WSL 2.
+    required: false
+    default: ""
+  cloud-init-meta-data:
+    description: >-
+      Path to cloud-init meta-data, relative to the workspace. Without it, the action writes
+      meta-data with "instance-id" set to the instance's name.
+    required: false
+    default: ""
+  cloud-init-timeout:
+    description: How many minutes to wait for cloud-init to finish before failing, above 0 and up to 35791.
+    required: false
+    default: "15"
+  allow-degraded:
+    description: >-
+      Accept cloud-init finishing with recoverable errors, or systemd starting with failed units,
+      with a warning instead of failing. "true" or "false".
+    required: false
+    default: "false"
+  wslconfig:
+    description: >-
+      The .wslconfig to set up in the user's profile. "default" writes settings for a runner
+      without a desktop, but only on GitHub-hosted runners, and keeps a .wslconfig that's already
+      there. "none" leaves .wslconfig alone. Anything else is a path to a .wslconfig, relative to
+      the workspace, which fails rather than replace another .wslconfig.
+    required: false
+    default: default
+  wslconfig-overwrite:
+    description: >-
+      Replace a .wslconfig that's already there with other content, "true" or "false". It never
+      makes "default" write on a self-hosted runner.
+    required: false
+    default: "false"
+outputs:
+  wsl-package-version:
+    description: The installed WSL package version, such as "3.0.3.0".
+  kernel-version:
+    description: The WSL kernel version, such as "6.18.54.1-1".
+  wslc-path:
+    description: The path to wslc.exe, WSL's container CLI, or empty when the package doesn't have one.
+  instance-name:
+    description: The name of the installed instance, or empty when no distribution was asked for.
+  cache-hit:
+    description: '"true" when the distribution image came from the Actions cache, otherwise "false".'
+  cloud-init-status:
+    description: '"done" or "degraded" after cloud-init provisioned the instance, or empty without user-data.'
+runs:
+  using: node24
+  main: dist/index.js
+  post: dist/index.js
+  post-if: always()

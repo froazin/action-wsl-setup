@@ -1,0 +1,336 @@
+import * as core from '@actions/core'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { provision } from '../src/cloudinit/provision.js'
+import { placeSeed, removeSavedSeed } from '../src/cloudinit/seed.js'
+import { downloadImage } from '../src/distro/download.js'
+import { installImage, listInstances } from '../src/distro/install.js'
+import { fetchManifest } from '../src/distro/manifest.js'
+import { resolveOciImage } from '../src/distro/oci.js'
+import { post, run } from '../src/main.js'
+import { applyWslConfig, checkWslConfig } from '../src/wsl/config.js'
+import { nativeArch, wslcPath } from '../src/wsl/exe.js'
+import { ensurePackage } from '../src/wsl/package.js'
+
+vi.mock('@actions/core')
+vi.mock('../src/wsl/package.js')
+vi.mock('../src/wsl/exe.js')
+vi.mock('../src/wsl/config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/wsl/config.js')>()),
+  applyWslConfig: vi.fn(),
+  checkWslConfig: vi.fn(),
+}))
+vi.mock('../src/distro/download.js')
+vi.mock('../src/distro/oci.js')
+vi.mock('../src/cloudinit/provision.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/cloudinit/provision.js')>()),
+  provision: vi.fn(),
+}))
+vi.mock('../src/cloudinit/seed.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/cloudinit/seed.js')>()),
+  placeSeed: vi.fn(),
+  removeSavedSeed: vi.fn(),
+  readInputFile: vi.fn((path: string) => `contents of ${path}`),
+}))
+vi.mock('../src/distro/manifest.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/distro/manifest.js')>()),
+  fetchManifest: vi.fn(),
+}))
+vi.mock('../src/distro/install.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/distro/install.js')>()),
+  installImage: vi.fn(),
+  listInstances: vi.fn(),
+}))
+
+const SHA = 'a'.repeat(64)
+const removeSeed = vi.fn()
+const WRITE = { write: true, content: '[wsl2]\n', replacing: false } as const
+
+describe('run', () => {
+  const inputs: Record<string, string> = {}
+
+  beforeEach(() => {
+    inputs.cache = 'true'
+    vi.mocked(core.getInput).mockImplementation((name) => inputs[name] ?? '')
+    vi.mocked(core.getBooleanInput).mockImplementation((name) => inputs[name] === 'true')
+    vi.mocked(core.group).mockImplementation(async (_name, fn) => fn())
+    vi.mocked(ensurePackage).mockResolvedValue({ package: '3.0.3.0', kernel: '6.18.54.1-1' })
+    vi.mocked(wslcPath).mockReturnValue('C:\\Program Files\\WSL\\wslc.exe')
+    vi.mocked(nativeArch).mockResolvedValue('x64')
+    vi.mocked(listInstances).mockResolvedValue([])
+    vi.mocked(fetchManifest).mockResolvedValue({
+      ModernDistributions: {
+        Ubuntu: [
+          { Name: 'Ubuntu-26.04', Amd64Url: { Url: 'https://example.com/u.wsl', Sha256: SHA } },
+        ],
+      },
+    })
+    vi.mocked(downloadImage).mockResolvedValue({ path: 'D:\\a\\_temp\\u.wsl', cacheHit: true })
+    vi.mocked(provision).mockResolvedValue('done')
+    vi.mocked(placeSeed).mockReturnValue(removeSeed)
+    vi.mocked(checkWslConfig).mockReturnValue(WRITE)
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+  })
+
+  afterEach(() => {
+    for (const key of Object.keys(inputs)) delete inputs[key]
+  })
+
+  it('sets the outputs from the installed package', async () => {
+    await run()
+    expect(core.setFailed).not.toHaveBeenCalled()
+    expect(core.setOutput).toHaveBeenCalledWith('wsl-package-version', '3.0.3.0')
+    expect(core.setOutput).toHaveBeenCalledWith('kernel-version', '6.18.54.1-1')
+    expect(core.setOutput).toHaveBeenCalledWith('wslc-path', 'C:\\Program Files\\WSL\\wslc.exe')
+  })
+
+  it('sets up .wslconfig after the distribution checks and before the install', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['wslconfig-overwrite'] = 'true'
+    await run()
+    expect(checkWslConfig).toHaveBeenCalledWith({ kind: 'default' }, true)
+    expect(applyWslConfig).toHaveBeenCalledWith(WRITE)
+    const order = (fn: unknown) =>
+      vi.mocked(fn as () => void).mock.invocationCallOrder[0] ?? Number.NaN
+    expect(order(checkWslConfig)).toBeLessThan(order(ensurePackage))
+    expect(order(fetchManifest)).toBeLessThan(order(applyWslConfig))
+    expect(order(applyWslConfig)).toBeLessThan(order(installImage))
+  })
+
+  it('fails on a missing wslconfig file before changing the runner', async () => {
+    inputs.wslconfig = 'missing.wslconfig'
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wslconfig is missing/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('fails on a conflicting .wslconfig before changing the runner', async () => {
+    vi.mocked(checkWslConfig).mockImplementation(() => {
+      throw new Error('Set wslconfig-overwrite to true to replace it.')
+    })
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wslconfig-overwrite/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('leaves .wslconfig alone when the instance name is taken', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    vi.mocked(listInstances).mockResolvedValue([{ name: 'Ubuntu-26.04', version: 2 }])
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/already has an instance/))
+    expect(applyWslConfig).not.toHaveBeenCalled()
+  })
+
+  describe('with image', () => {
+    beforeEach(() => {
+      inputs['instance-name'] = 'mine'
+    })
+
+    it('downloads a URL and checks it against image-sha256', async () => {
+      inputs.image = 'https://example.com/images/my.wsl'
+      inputs['image-sha256'] = SHA
+      await run()
+      expect(core.setFailed).not.toHaveBeenCalled()
+      expect(fetchManifest).not.toHaveBeenCalled()
+      expect(downloadImage).toHaveBeenCalledWith(
+        {
+          name: 'https://example.com/images/my.wsl',
+          url: 'https://example.com/images/my.wsl',
+          sha256: SHA,
+          fileName: 'my.wsl',
+        },
+        true,
+      )
+      expect(installImage).toHaveBeenCalledWith('mine', 'D:\\a\\_temp\\u.wsl', 2)
+      expect(core.setOutput).toHaveBeenCalledWith('instance-name', 'mine')
+    })
+
+    it('downloads a URL without image-sha256, leaving it unchecked', async () => {
+      inputs.image = 'https://example.com/images/my.wsl'
+      await run()
+      expect(core.setFailed).not.toHaveBeenCalled()
+      expect(downloadImage).toHaveBeenCalledWith(
+        expect.objectContaining({ url: 'https://example.com/images/my.wsl', sha256: undefined }),
+        true,
+      )
+    })
+
+    it("downloads an OCI image's layer for the runner's architecture", async () => {
+      const image = {
+        name: 'ghcr.io/o/wsl:1',
+        url: 'https://ghcr.io/b',
+        sha256: SHA,
+        fileName: 'f.wsl',
+      }
+      vi.mocked(resolveOciImage).mockResolvedValue(image)
+      inputs.image = 'oci://ghcr.io/o/wsl:1'
+      await run()
+      expect(resolveOciImage).toHaveBeenCalledWith('ghcr.io/o/wsl:1', 'x64')
+      expect(downloadImage).toHaveBeenCalledWith(image, true)
+    })
+
+    it('provisions an image with cloud-init', async () => {
+      inputs.image = 'https://example.com/my.wsl'
+      inputs['image-sha256'] = SHA
+      inputs['cloud-init-user-data'] = 'user-data'
+      await run()
+      expect(provision).toHaveBeenCalledWith('mine', 15, false)
+    })
+
+    it('needs an instance name', async () => {
+      inputs['instance-name'] = ''
+      inputs.image = 'oci://ghcr.io/o/wsl:1'
+      await run()
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringMatching(/image needs instance-name/),
+      )
+      expect(ensurePackage).not.toHaveBeenCalled()
+    })
+
+    it("can't be used with distribution", async () => {
+      inputs.image = 'oci://ghcr.io/o/wsl:1'
+      inputs.distribution = 'Ubuntu-26.04'
+      await run()
+      expect(core.setFailed).toHaveBeenCalledWith('Set distribution or image, not both.')
+    })
+  })
+
+  it("doesn't install a distribution unless one is asked for", async () => {
+    await run()
+    expect(fetchManifest).not.toHaveBeenCalled()
+    expect(installImage).not.toHaveBeenCalled()
+  })
+
+  it('passes the package request and token on', async () => {
+    inputs['wsl-package-version'] = '2.7.14'
+    inputs.token = 'secret'
+    await run()
+    expect(ensurePackage).toHaveBeenCalledWith({ kind: 'exact', tag: '2.7.14' }, 'secret')
+  })
+
+  it('sets an empty wslc-path when the package has no wslc.exe', async () => {
+    vi.mocked(wslcPath).mockReturnValue(undefined)
+    await run()
+    expect(core.setOutput).toHaveBeenCalledWith('wslc-path', '')
+  })
+
+  it('installs a distribution under its own name as WSL 2 by default', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    await run()
+    expect(core.setFailed).not.toHaveBeenCalled()
+    expect(downloadImage).toHaveBeenCalledWith(expect.objectContaining({ sha256: SHA }), true)
+    expect(installImage).toHaveBeenCalledWith('Ubuntu-26.04', 'D:\\a\\_temp\\u.wsl', 2)
+    expect(core.setOutput).toHaveBeenCalledWith('instance-name', 'Ubuntu-26.04')
+    expect(core.setOutput).toHaveBeenCalledWith('cache-hit', 'true')
+  })
+
+  it('installs under another name, as WSL 1, without the cache', async () => {
+    inputs.distribution = 'ubuntu-26.04'
+    inputs['instance-name'] = 'ci'
+    inputs['wsl-version'] = '1'
+    inputs.cache = 'false'
+    await run()
+    expect(downloadImage).toHaveBeenCalledWith(expect.anything(), false)
+    expect(installImage).toHaveBeenCalledWith('ci', 'D:\\a\\_temp\\u.wsl', 1)
+  })
+
+  it('refuses to replace an existing instance', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    vi.mocked(listInstances).mockResolvedValue([{ name: 'ubuntu-26.04', version: 2 }])
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/already has an instance/))
+    expect(installImage).not.toHaveBeenCalled()
+  })
+
+  it('checks the inputs before changing the runner', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['wsl-version'] = '3'
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wsl-version must be 1 or 2/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('checks the instance name before changing the runner', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['instance-name'] = 'has space'
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/valid instance name/))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('places the seed before the install, provisions and removes the seed', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['cloud-init-user-data'] = 'user-data'
+    inputs['cloud-init-timeout'] = '20'
+    await run()
+    expect(core.setFailed).not.toHaveBeenCalled()
+    expect(placeSeed).toHaveBeenCalledWith('Ubuntu-26.04', {
+      userData: 'contents of user-data',
+      metaData: 'instance-id: Ubuntu-26.04\n',
+    })
+    expect(vi.mocked(placeSeed).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(installImage).mock.invocationCallOrder[0] ?? 0,
+    )
+    expect(provision).toHaveBeenCalledWith('Ubuntu-26.04', 20, false)
+    expect(core.setOutput).toHaveBeenCalledWith('cloud-init-status', 'done')
+    expect(removeSeed).toHaveBeenCalled()
+  })
+
+  it('removes the seed when provisioning fails', async () => {
+    inputs.distribution = 'Ubuntu-26.04'
+    inputs['cloud-init-user-data'] = 'user-data'
+    vi.mocked(provision).mockRejectedValue(new Error('cloud-init failed: boom'))
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith('cloud-init failed: boom')
+    expect(removeSeed).toHaveBeenCalled()
+  })
+
+  it.each([
+    [{ 'cloud-init-user-data': 'u' }, /needs a distribution/],
+    [{ distribution: 'Ubuntu-26.04', 'cloud-init-meta-data': 'm' }, /needs cloud-init-user-data/],
+    [
+      { distribution: 'Ubuntu-26.04', 'cloud-init-user-data': 'u', 'wsl-version': '1' },
+      /cloud-init needs WSL 2/,
+    ],
+    [{ 'cloud-init-timeout': 'soon' }, /cloud-init-timeout/],
+  ])('checks the cloud-init inputs before changing the runner: %j', async (given, message) => {
+    Object.assign(inputs, given)
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(message))
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('fails on a runner that is not Windows', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith('WSL runs on Windows, but this runner is linux.')
+    expect(ensurePackage).not.toHaveBeenCalled()
+  })
+
+  it('fails on a bad wsl-package-version', async () => {
+    inputs['wsl-package-version'] = 'newest'
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringMatching(/wsl-package-version/))
+  })
+
+  it('fails with the error from setting up the package', async () => {
+    vi.mocked(ensurePackage).mockRejectedValue(new Error('msiexec failed'))
+    await run()
+    expect(core.setFailed).toHaveBeenCalledWith('msiexec failed')
+  })
+})
+
+describe('post', () => {
+  it('removes the seed files the main step recorded', () => {
+    post()
+    expect(removeSavedSeed).toHaveBeenCalled()
+    expect(core.setFailed).not.toHaveBeenCalled()
+  })
+
+  it("fails the post step when it can't remove them", () => {
+    vi.mocked(removeSavedSeed).mockImplementation(() => {
+      throw new Error('EBUSY')
+    })
+    post()
+    expect(core.setFailed).toHaveBeenCalledWith('EBUSY')
+  })
+})
