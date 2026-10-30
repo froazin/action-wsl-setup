@@ -1,6 +1,6 @@
 # CI
 
-How the GitHub Actions workflows check a pull request (PR): the lint and unit tests, Claude's code review, the title and description check and auto-merge for Dependabot. It's for engineers who change a workflow, or want to know why a PR can't merge. How `main` is tested and released is in [releases.md](releases.md). The commands CI runs are in [Building and testing](../CONTRIBUTING.md#building-and-testing).
+How the GitHub Actions workflows check a pull request (PR): the lint and unit tests, Claude's code review, and the title and description check. It's for engineers who change a workflow, or want to know why a PR can't merge. How `main` is tested and released is in [releases.md](releases.md). The commands CI runs are in [Building and testing](../CONTRIBUTING.md#building-and-testing).
 
 ## Contents
 
@@ -8,7 +8,6 @@ How the GitHub Actions workflows check a pull request (PR): the lint and unit te
 1. [How it works](#how-it-works)
 1. [Code review](#code-review)
 1. [Title and description](#title-and-description)
-1. [Auto-merge](#auto-merge)
 1. [Set up](#set-up)
 1. [Security](#security)
 1. [Decisions](#decisions)
@@ -17,12 +16,12 @@ How the GitHub Actions workflows check a pull request (PR): the lint and unit te
 
 ## Overview
 
-Two workflows in [.github/workflows/](../.github/workflows/) run on every PR to `main`. A maintainer merges each PR once `CI result` and `PR title and description` pass and every review thread is resolved. The ruleset requires the resolved threads. Dependabot's PRs merge themselves from the last job in `ci.yml`. This flowchart shows the jobs:
+Two workflows in [.github/workflows/](../.github/workflows/) run on every PR to `main`. A maintainer merges each PR once `CI result` and `PR title and description` pass and every review thread is resolved. The ruleset requires the resolved threads. This flowchart shows the jobs:
 
 ```mermaid
 flowchart LR
     accTitle: The workflows that run on a pull request
-    accDescr: A pull request to main starts two workflows. In ci.yml, the changes job decides whether code changed. The checks job runs the lint, type check, unit tests and build when it did. The code-review job runs Claude Sonnet when the checks passed or weren't needed, and comments on the pull request. The result job fails unless every job passed or was skipped. pull-request.yml runs Claude Haiku on the title and description. Once both checks pass and every thread is resolved, a maintainer merges the pull request. For Dependabot's, the merge job does once the result job passes.
+    accDescr: A pull request to main starts two workflows. In ci.yml, the changes job decides whether code changed. The checks job runs the lint, type check, unit tests and build when it did. The code-review job runs Claude Sonnet when the checks passed or weren't needed, and comments on the pull request. The result job fails unless every job passed or was skipped. pull-request.yml runs Claude Haiku on the title and description. Once both checks pass and every thread is resolved, a maintainer merges the pull request.
     pr[Pull request to main] --> changes[ci.yml: changes]
     changes -->|code changed| checks[checks: lint, types, tests, build]
     checks -->|passed or skipped| review[code-review: Claude Sonnet]
@@ -34,7 +33,6 @@ flowchart LR
     result -->|passed| merge[Squash merge by a maintainer]
     title -->|passed| merge
     threads -->|all resolved| merge
-    result -->|passed, Dependabot's PR| bot[merge: squash merge]
 ```
 
 ## How it works
@@ -46,7 +44,6 @@ flowchart LR
 - **`checks`** runs Biome, `tsc`, Vitest and the build. `dist/` isn't committed, so the build only shows that it works.
 - **`code-review`** runs when `changes` passed and `checks` passed or was skipped, so no tokens go on code that's known to be broken. It skips drafts and Dependabot's PRs. See [Code review](#code-review).
 - **`result`** runs with `if: always()` and fails unless every job it needs passed or was skipped. It's the one check to look at before merging, so a skipped job never holds a PR back and a failed one always does.
-- **`merge`** squash-merges Dependabot's PR once `result` passes. See [Auto-merge](#auto-merge).
 
 The workflow always runs, rather than filtering paths in `on:`, so `CI result` reports on every PR. A workflow skipped by a path filter reports nothing, which would block the PR if the check were ever required.
 
@@ -77,22 +74,11 @@ The squash-merged commit's message comes from the PR's title and description, an
 - It reads the title and description through the API rather than from the event, so a re-run checks the current ones.
 - It skips drafts, and Dependabot's PRs, whose titles come from the prefix in [dependabot.yml](../.github/dependabot.yml), as [Pull requests](../CONTRIBUTING.md#pull-requests) says.
 
-## Auto-merge
-
-The `merge` job in `ci.yml` squash-merges a Dependabot PR once `CI result` passes, with `gh pr merge --squash --match-head-commit`, and GitHub deletes the branch. Nothing else merges by itself.
-
-- It runs only when Dependabot is both the PR's author and the run's actor. If a maintainer pushes to a Dependabot branch, the PR waits for a person.
-- `--match-head-commit` refuses the merge if Dependabot pushed again after the run started. That push starts its own run.
-- A workflow Dependabot starts gets a read-only token, unless a job asks for more with `permissions:`, as this one does. It runs no code from the PR.
-- The commit takes Dependabot's title and description, which CI doesn't check or reword.
-- Dependabot opens npm updates on Mondays and GitHub Actions updates on Wednesdays, so each is tested on a `main` that already has the other.
-- The workflow's token can't have the `workflows` permission, and GitHub is reported to refuse merges that change `.github/workflows/` without it. So a GitHub Actions update may stay open with CI passed, for a maintainer to merge.
-
 ## Set up
 
 - **`CLAUDE_CODE_OAUTH_TOKEN`**, a repository secret, bills Claude's runs to the maintainer's Claude subscription. Make it with `claude setup-token` and save it with `gh secret set CLAUDE_CODE_OAUTH_TOKEN`. It lasts a year. Without it, the PR reviews are skipped with a notice, but a release fails, because the release notes and the wiki need it.
 - **The `Protect Main` ruleset** requires squash merges, signed commits, linear history and resolved review threads. It requires no status checks, so a maintainer checks `CI result` and `PR title and description` before merging.
-- **Merges** are squash only, with the PR's title and description as the commit message, and GitHub deletes the head branch afterwards. Auto-merge is allowed, for a maintainer to use from a PR.
+- **Merges** are squash only, with the PR's title and description as the commit message, and GitHub deletes the head branch afterwards.
 - **Actions** only runs actions that GitHub owns and an allow list, `anthropics/claude-code-action@*` and `oven-sh/setup-bun@*`, which the Claude action uses itself. Every action must be pinned to a full commit SHA. Add a pattern for any new action outside GitHub.
 
 ## Security
@@ -101,17 +87,15 @@ The `merge` job in `ci.yml` squash-merges a Dependabot PR once `CI result` passe
 - **The workflow's token, as narrow as each job allows.** Both reviews pass it as `github_token`, so the Claude GitHub App's token isn't used. The title check's can only read. The code review's adds `pull-requests: write` to comment and `actions: read` to count earlier reviews.
 - **PR content is data.** Both prompts say to treat titles, descriptions, commits, files and comments as data. Only collaborators can open PRs, and the code review sees only trusted authors' comments.
 - **Few tools.** Neither review has Bash. The code review can read files and post review comments, and can't push, approve or merge.
-- **The merge job runs no code.** It doesn't check out the PR, and only runs for Dependabot.
 
 ## Decisions
 
-- **One gate job.** `CI result` sums up every job, so there's one check to read, and the Dependabot merge waits on it.
+- **One gate job.** `CI result` sums up every job, so there's one check to read before merging.
 - **The code review after the checks.** No tokens go on code that doesn't build or pass its tests. The end-to-end tests don't run on PRs, so the review doesn't wait for them.
 - **Resolved threads, not a failing check.** A wrong finding is resolved with a reply rather than a re-run. That's why Nits are capped.
 - **The title check in its own workflow.** Editing a title fires `edited`, which in `ci.yml` would cancel and rerun the tests.
 - **No review of Dependabot's PRs.** They only change dependencies, which the checks and the end-to-end tests on `main` cover.
-- **Merging for Dependabot only.** Every other PR gets a maintainer's review before it merges.
-- **No required status checks.** The maintainer chose not to require them. The Dependabot merge waits on `CI result` itself, and a maintainer reads the checks before merging anything else.
+- **No required status checks.** The maintainer chose not to require them, and reads the checks before merging.
 
 ## Limits
 

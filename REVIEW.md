@@ -52,8 +52,7 @@ These are the rules that no tool, test or check enforces.
 
 - A new path that the build or the tests read isn't covered by `DOCS` in `.github/workflows/ci.yml` or `release.yml`, and the two lists still agree.
 - A new job in `ci.yml` is in the `needs` list of the `CI result` job.
-- Nothing commits `dist/` to `main`, and nothing but the release job writes to a release branch, such as `v0`, or makes a `vX.Y.Z` tag.
-- The `merge` job in `ci.yml` still merges only PRs that Dependabot both opened and triggered, and only after `CI result` passed.
+- Nothing commits `dist/` to `main`, and nothing but the release job writes to a release branch, such as `release/v0`, or makes a `vX.Y.Z` tag.
 - A new job in `e2e.yml` needs the `build` job and tests its `dist` artifact, so what's released is what was tested.
 - A new action that GitHub doesn't own needs a pattern on the repository's allow list, as the "Set up" section of `docs/ci.md` says. The list isn't in the repository, so report a new one as a Nit that reminds the maintainer to allow it.
 - A change to this file's severities, its Nit cap or what it says about pre-existing issues also changes the code review's prompt in `.github/workflows/ci.yml`, and the other way round.

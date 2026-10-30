@@ -67,7 +67,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
-          # An auto-merged Dependabot PR that changes release.yml can make a bot the schedule's actor, which the action refuses unless it's allowed.
+          # Whoever last changed release.yml's schedule becomes its actor. If that's ever a bot, the action refuses to run unless it's allowed.
           allowed_bots: github-actions[bot],dependabot[bot]
           claude_args: >-
             --model claude-sonnet-5-5

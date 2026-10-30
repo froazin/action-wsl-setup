@@ -43,7 +43,7 @@ PRs are squash-merged, so the title becomes the commit header on `main` and the 
 - **`[skip ci]`:** don't add it. CI wouldn't run, so there'd be no `CI result` to merge on.
 - **Dependabot:** its titles come from the `chore(deps)` prefix in `.github/dependabot.yml`, and its descriptions are its own. CI doesn't check or reword them. Dependabot copies the capitalisation of its last commit on `main`, so rename its first PR to start `chore(deps): Bump` by hand, and later ones follow.
 
-A maintainer reviews and squash-merges every PR once `CI result` and `PR title and description` pass, every review thread is resolved and it's up to date with `main`. GitHub then deletes its branch. Open a draft PR while you're still working on a change, and mark it ready for review when it's done. Dependabot's PRs merge themselves once CI passes, as [docs/ci.md](docs/ci.md#auto-merge) describes.
+A maintainer reviews and squash-merges every PR once `CI result` and `PR title and description` pass, every review thread is resolved and it's up to date with `main`. GitHub then deletes its branch. Open a draft PR while you're still working on a change, and mark it ready for review when it's done.
 
 ## CI
 

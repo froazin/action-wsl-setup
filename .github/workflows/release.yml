@@ -1,7 +1,7 @@
 ---
 name: Release
 
-# Nightly, after Dependabot's PRs have had time to auto-merge. Run it by hand to release now, or to set the version, such
+# Nightly, after Dependabot's 01:00 UTC PRs have opened. Run it by hand to release now, or to set the version, such
 # as 0.1.0.
 on:
   schedule:
@@ -169,7 +169,7 @@ jobs:
           ls -l .release
 
       # Claude only reads files and returns JSON. The next job publishes, without Claude.
-      # An auto-merged Dependabot PR that changes this file can make a bot the schedule's actor, which the action refuses unless it's allowed.
+      # Whoever last changed the schedule becomes its actor. If that's ever a bot, the action refuses to run unless it's allowed.
       - name: Write the release notes
         id: notes
         if: steps.ship.outputs.release == 'true'
@@ -309,7 +309,8 @@ jobs:
             const { owner, repo } = context.repo;
             const { GITHUB_SHA: sha, PREVIOUS: previous, VERSION: version } = process.env;
             const tag = `v${version}`;
-            const branch = `v${version.split('.')[0]}`;
+            // release/vMAJOR, so a branch name never looks like a vX.Y.Z tag.
+            const branch = `release/v${version.split('.')[0]}`;
             const commitOf = async (ref) => {
               try {
                 return (await github.rest.git.getRef({ owner, repo, ref })).data.object.sha;

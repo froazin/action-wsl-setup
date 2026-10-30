@@ -21,14 +21,14 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 | `tests/` | Vitest unit tests, one `<module>.test.ts` per module in `src/` |
 | `dist/` | The bundle runners execute, built by `npm run build`. Git ignores it on `main`. The release workflow builds it and commits it to the release branches |
 | `docs/` | Design docs, one per part of the action |
-| `.github/workflows/` | CI and releases. `ci.yml` and `pull-request.yml` run on pull requests, and `ci.yml` merges Dependabot's. Before you change them, read [docs/ci.md](docs/ci.md). `release.yml`, `e2e.yml` and `wiki.yml` test `main`, release it and update the wiki. Before you change them, read [docs/releases.md](docs/releases.md) |
+| `.github/workflows/` | CI and releases. `ci.yml` and `pull-request.yml` run on pull requests. Before you change them, read [docs/ci.md](docs/ci.md). `release.yml`, `e2e.yml` and `wiki.yml` test `main`, release it and update the wiki. Before you change them, read [docs/releases.md](docs/releases.md) |
 | `.github/scripts/`, `.github/fixtures/` | PowerShell scripts, and the cloud-init user-data and `.wslconfig` files the end-to-end jobs use |
 | `.github/dependabot.yml` | The weekly dependency updates. See [Dependabot](docs/releases.md#dependabot) |
 | `REVIEW.md` | Instructions for CI's Claude code review: what counts as Important, the Nit cap, what to skip, what to always check and the evidence a finding needs |
 
 ## Conventions
 
-- Never commit `dist/` to `main`. Runners execute it from the release branches, `v0`, `v1` and so on, where the release workflow commits it.
+- Never commit `dist/` to `main`. Runners execute it from the release branches, `release/v0`, `release/v1` and so on, where the release workflow commits it. The `release/` prefix is only for those branches.
 - The code is ESM. Import relative modules with a `.js` extension, such as `./main.js`.
 - Keep the action generic: other people use it for their own purposes. It supports every hosted Windows image and self-hosted runners, so don't check for particular runner images. Rely on what WSL reports, and fail with its error.
 - Run `wsl.exe` only through `wsl()` in [`src/wsl/exe.ts`](src/wsl/exe.ts), never by a bare `wsl` name.
@@ -37,7 +37,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 - Install dependencies only through npm with this repository's `.npmrc`. Its `min-release-age=7` skips any version published in the last 7 days. Don't override it.
 - Pin every action a workflow uses to a full commit SHA, with its version in a comment.
 - Build, lint and test with the commands in [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Only Dependabot's pull requests merge themselves in CI.** Every other PR is squash-merged by hand, by a maintainer or an agent working with one, once `CI result` and `PR title and description` pass and every review thread is resolved. Open a PR when it's ready for review, or a draft while you're still working on it. Write its title and description by [Pull requests](CONTRIBUTING.md#pull-requests), because they become the commit on `main`.
+- **Squash-merge a pull request once `CI result` and `PR title and description` pass and every review thread is resolved.** Open a PR when it's ready for review, or a draft while you're still working on it. Write its title and description by [Pull requests](CONTRIBUTING.md#pull-requests), because they become the commit on `main`.
 - Resolve a review thread only after you've fixed what it raises, or replied with why it isn't a problem.
 - When you review a change locally, such as with `/code-review`, also follow `REVIEW.md` as it is on `main` (`git show main:REVIEW.md`), not a copy the change edits.
 
@@ -52,7 +52,7 @@ This project follows the user's shared ways of working (the `wow-*` skills). The
 
 - **Commit scopes:** `wsl`, `distro`, `cloud-init`, `tooling`, `ci`, `deps`, `docs`, `claude`.
 - **Feature flags:** none yet.
-- **Releases:** `release.yml` runs every night. It tests `main` and releases when the built `dist/` or `action.yml` differ from the last release. Each release is a commit on the major version's branch, such as `v0`, with `dist/` added, tagged `vX.Y.Z`, with release notes Claude writes. The tags hold the version, in alpha until a maintainer releases `0.1.0` by hand. Don't tag a release, or push to a release branch, yourself. See [docs/releases.md](docs/releases.md).
+- **Releases:** `release.yml` runs every night. It tests `main` and releases when the built `dist/` or `action.yml` differ from the last release. Each release is a commit on the major version's branch, such as `release/v0`, with `dist/` added, tagged `vX.Y.Z`, with release notes Claude writes. The tags hold the version, in alpha until a maintainer releases `0.1.0` by hand. Don't tag a release, or push to a release branch, yourself. See [docs/releases.md](docs/releases.md).
 - **CI:** `ci.yml` and `pull-request.yml` on every PR to `main`, and the lint, unit and end-to-end tests on `main` before each release. See [docs/ci.md](docs/ci.md).
 - **Build and test:** see [CONTRIBUTING.md](CONTRIBUTING.md).
 

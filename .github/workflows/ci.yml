@@ -346,23 +346,3 @@ jobs:
             exit 1
           fi
           echo "Every job passed or was skipped."
-
-  # Dependabot's PRs merge as soon as CI passes. Every other PR waits for a maintainer. Both the author and the actor must
-  # be Dependabot, so a maintainer's push to its branch leaves the PR for a person to merge.
-  merge:
-    name: Merge Dependabot's PR
-    needs: result
-    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
-    runs-on: *runs-on
-    # A workflow Dependabot starts gets a read-only token unless it asks for more, as this job does. It runs no code from the PR.
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      # --match-head-commit refuses the merge if Dependabot pushed again after this run started.
-      - name: Squash-merge the pull request
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: gh pr merge "$NUMBER" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$HEAD_SHA"

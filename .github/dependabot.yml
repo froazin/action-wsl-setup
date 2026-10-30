@@ -3,8 +3,7 @@ version: 2
 updates:
   # A 7-day cooldown, like min-release-age in .npmrc, gives a compromised
   # release time to be caught before Dependabot proposes it.
-  # PRs open at 01:00 UTC and merge once CI passes, before the nightly
-  # release at 05:00 UTC. The prefix gives a "chore(deps):" header,
+  # PRs open at 01:00 UTC, before the nightly release at 05:00 UTC. The prefix gives a "chore(deps):" header,
   # with a scope from CLAUDE.md.
   - package-ecosystem: "npm"
     directory: "/"
@@ -31,8 +30,7 @@ updates:
         patterns:
           - "*"
 
-  # Wednesday, apart from npm's Monday PR, so each is tested on a main that
-  # already has the other.
+  # Wednesday, apart from npm's Monday PR, so there's one to review at a time.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

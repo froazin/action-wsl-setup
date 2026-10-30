@@ -26,7 +26,7 @@ flowchart TD
     run[Nightly or by hand, on main] --> plan[plan: last release and what changed]
     plan -->|anything but docs changed| test[e2e.yml: lint, unit tests, build dist, end-to-end tests]
     test -->|dist artifact| notes[notes: compare with the last release, Claude Sonnet writes the notes]
-    notes -->|changed: version and notes| release[release: commit dist to vMAJOR and tag vX.Y.Z]
+    notes -->|changed: version and notes| release[release: commit dist to release/vMAJOR and tag vX.Y.Z]
     release -->|tag| wiki[wiki.yml: Claude Sonnet edits, a script checks and pushes]
 ```
 
@@ -46,13 +46,13 @@ Every job works on the run's commit, `GITHUB_SHA`, so a PR merged during the run
 
 ## Release branches
 
-`dist/` is never committed to `main`. Each major version has a release branch, `v0`, `v1` and so on, and every release is one commit on it, tagged `vX.Y.Z`. Users run `@v0` for the newest `0.x` release, or a tag to pin one.
+`dist/` is never committed to `main`. Each major version has a release branch, `release/v0`, `release/v1` and so on, and every release is one commit on it, tagged `vX.Y.Z`. Users run `@release/v0` for the newest `0.x` release, or a tag to pin one. The `release/` prefix keeps a branch name from ever looking like a release tag.
 
 - The release commit holds every file on `main` at the tested commit except `.github/`, with the tested `dist/` added. Leaving out `.github/` keeps workflow files off the release branches, which the workflow's token can't write.
 - Its only parent is the release branch's last commit, or the last release when it starts a new major version. Its message ends `Built from <sha> on main.`, which `plan` reads to find what's changed since.
 - The job makes the blobs, tree and commit through the GitHub API, so GitHub signs the commit, and moves the branch only forward. It fails if the tag already exists, because a release attached to an existing tag couldn't be undone.
 - `gh release create` then tags the commit and publishes the notes. Immutable releases are on, so the tag can't move or be deleted.
-- The `Protect release branches` ruleset stops a `v*` branch being deleted or force-pushed, and `Protect release tags` stops a `v*` tag being moved or deleted. Admins can bypass both, as on `main`.
+- The `Protect release branches` ruleset stops a `release/*` branch being deleted or force-pushed, and `Protect release tags` stops a `v*` tag being moved or deleted. Admins can bypass both, as on `main`.
 
 ## Versions
 
@@ -82,7 +82,7 @@ The wiki at `https://github.com/froazin/action-wsl-setup/wiki` is the user guide
 
 ## Dependabot
 
-[dependabot.yml](../.github/dependabot.yml) opens npm updates at 01:00 UTC on Mondays and GitHub Actions updates at 01:00 UTC on Wednesdays, with a 7-day cooldown. They auto-merge once their checks pass, as [Auto-merge](ci.md#auto-merge) describes, so the 05:00 run tests and releases them.
+[dependabot.yml](../.github/dependabot.yml) opens npm updates at 01:00 UTC on Mondays and GitHub Actions updates at 01:00 UTC on Wednesdays, with a 7-day cooldown. A maintainer merges them once `CI result` passes, and the next 05:00 run tests and releases them.
 
 - Claude doesn't review them, and CI doesn't check or reword their titles and descriptions.
 - A Dependabot commit's body quotes upstream release notes, so the release notes job sees only its header.
@@ -93,11 +93,11 @@ The wiki at `https://github.com/froazin/action-wsl-setup/wiki` is the user guide
 - **No write token near the build.** The build that makes `dist/` has a read-only token. The jobs that commit and push run no project code.
 - **No write token near Claude.** Claude only reads files and returns JSON, or edits a copy of the wiki, in jobs with a read-only token. A separate job without Claude publishes or pushes.
 - **Untrusted text stays out.** Dependabot commits' bodies are left out of the release notes. The wiki prompt treats the wiki's pages as data. Only collaborators can edit the wiki, set by "Restrict editing to collaborators only" in the repository's settings. The API can't read that setting, so check it there if it's in doubt.
-- **The schedule's actor.** An auto-merged Dependabot PR that changes `release.yml` can make a bot the actor of later scheduled runs, so the Claude steps allow `github-actions[bot]` and `dependabot[bot]` with `allowed_bots`.
+- **The schedule's actor.** Whoever last changed the schedule becomes the actor of later scheduled runs, and the Claude action refuses a bot it doesn't allow. GitHub doesn't say which account a merged change makes the actor, so the Claude steps allow `github-actions[bot]` and `dependabot[bot]` with `allowed_bots`. These workflows only run on a schedule or by hand, so that widens nothing.
 
 ## Decisions
 
-- **Nightly, not on every merge.** Several merges become one release, and Dependabot's updates ship the morning they merge.
+- **Nightly, not on every merge.** Several merges become one release, and Dependabot's updates ship the morning after they merge.
 - **`dist/` on release branches, not `main`.** No PR, Dependabot's included, has to rebuild `dist/`, and what's released is exactly what the end-to-end tests ran.
 - **The end-to-end tests on `main`, not on PRs.** They keep PRs fast. A broken `main` holds back the release until a fix merges.
 - **The wiki from the release workflow.** A release made with the workflow's token doesn't start `on: release` workflows, and the Claude action doesn't support the `release` event.
