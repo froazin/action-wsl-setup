@@ -1,4 +1,1 @@
 * text=auto eol=lf
-
-# Built by `npm run build`. Collapse it in diffs and keep it out of language stats.
-dist/** -diff linguist-generated=true

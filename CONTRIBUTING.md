@@ -1,17 +1,10 @@
 # Contributing
 
-How to report a problem, propose a change, and build and test the action.
+How the maintainers build, test and land changes to the action, and how a pull request (PR) must be titled and described.
 
-## Reporting a problem
+## Outside contributions
 
-Open an issue. Include the runner image and version from the "Set up job" step of your workflow run, the action's inputs and the failing step's log.
-
-## Proposing a change
-
-1. Fork the repository and create a branch named `feature/<slug>`, `bugfix/<slug>` or `other/<slug>`.
-1. Make one focused change, and rebase on `main` rather than merging it in.
-1. Write commit messages and the pull request (PR) title as [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), such as `feat(distro): Add a source input`.
-1. Open a PR to `main`. PRs are squash-merged, so the title and description become the commit on `main`.
+The project doesn't accept issues or PRs from outside its collaborators. The action is MIT licensed, so you're welcome to fork it and change it however you like. See [LICENSE](LICENSE).
 
 ## Prerequisites
 
@@ -29,13 +22,35 @@ npm test            # run the unit tests with Vitest
 npm run build       # bundle src/ into dist/ with ncc
 ```
 
-Runners execute `dist/`, not `src/`. Run `npm run build` and commit `dist/` with every change to the source or the dependencies.
+Runners execute `dist/`, not `src/`. Git ignores `dist/` on `main`: the release workflow builds it and commits it to the release branch, so don't commit it yourself.
 
 `.npmrc` sets `min-release-age=7`, so npm won't install a version published in the last 7 days. Dependabot waits for the same cooldown.
 
+## Pull requests
+
+PRs are squash-merged, so the title becomes the commit header on `main` and the description becomes the commit body. The release notes and the next version are worked out from those commits, and CI checks both against these rules, except on Dependabot's PRs.
+
+- **Title:** a [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) header, `type(scope)!: Description`, such as `feat(distro): Add a source input`.
+  - The type is lowercase, such as `feat`, `fix`, `refactor`, `test`, `docs`, `ci` or `chore`.
+  - The scope is lowercase and one of the commit scopes in [CLAUDE.md](CLAUDE.md#ways-of-working).
+  - The description is an instruction that starts with a capital letter, such as "Add", and doesn't end with a full stop.
+  - Leave out the PR number. GitHub adds it when it merges.
+- **Description:** the commit body, in British English. Say what changed and why.
+  - Add no footers, such as `Co-Authored-By:` or `BREAKING CHANGE:`. GitHub adds the co-authors from the branch's commits.
+  - Close an issue with a line such as `Closes #123`, but not as the last paragraph.
+  - No line may be `---` on its own, or start with `--- `. Git reads it as the start of a patch.
+- **Breaking change:** a `!` straight before the colon in the title. Start the description with what breaks, why, who's affected and what to do instead.
+- **`[skip ci]`:** don't add it. CI wouldn't run, so there'd be no `CI result` to merge on.
+- **Dependabot:** its titles come from the `chore(deps)` prefix in `.github/dependabot.yml`, and its descriptions are its own. CI doesn't check or reword them. Dependabot copies the capitalisation of its last commit on `main`, so rename its first PR to start `chore(deps): Bump` by hand, and later ones follow.
+
+A maintainer reviews and squash-merges every PR once `CI result` and `PR title and description` pass, every review thread is resolved and it's up to date with `main`. GitHub then deletes its branch. Open a draft PR while you're still working on a change, and mark it ready for review when it's done. Dependabot's PRs merge themselves once CI passes, as [docs/ci.md](docs/ci.md#auto-merge) describes.
+
 ## CI
 
-Two workflows run on every PR to `main`:
+Every PR to `main` runs the checks in [docs/ci.md](docs/ci.md): lint, type check, unit tests and the build, then a code review by Claude. A separate check reviews the title and description. Changes only to docs skip the tests.
 
-- `.github/workflows/ci.yml` runs on Ubuntu. It lints, type checks, runs the unit tests, rebuilds `dist/` and fails if the result differs from the committed `dist/`.
-- `.github/workflows/e2e.yml` runs the action from the PR's `dist/` on the `windows-2025`, `windows-2022` and `windows-11-arm` runners and checks what it did. It also checks that the action fails cleanly on Linux. The unit tests can't cover this, because they don't run on Windows.
+The end-to-end tests run the action on the hosted Windows runners. They run on `main` every night, before any release, as [docs/releases.md](docs/releases.md) describes. To test a branch before it merges, run them by hand:
+
+```bash
+gh workflow run e2e.yml --ref <branch>
+```

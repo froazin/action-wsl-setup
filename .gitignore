@@ -9,3 +9,6 @@ npm-debug.log*
 
 # Vitest coverage
 coverage/
+
+# Built by `npm run build`. The release workflow commits it to the release branches, never to main.
+dist/

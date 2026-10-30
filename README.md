@@ -3,7 +3,7 @@
 A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runners.
 
 > [!WARNING]
-> The action is under development and has no release yet.
+> The action is in alpha, so any release can change its inputs and outputs. `@v0` runs the newest `0.x` release. Pin a release, such as `@v0.0.1`, or its commit, to stay on it.
 
 ## Usage
 
@@ -12,7 +12,7 @@ jobs:
   test:
     runs-on: windows-2025
     steps:
-      - uses: froazin/action-wsl-setup@main
+      - uses: froazin/action-wsl-setup@v0
         id: wsl
         with:
           distribution: Ubuntu-26.04
@@ -29,7 +29,7 @@ Instances are WSL 2 unless you set `wsl-version: 1`. WSL 2 needs virtualisation,
 ```yaml
     runs-on: windows-11-arm
     steps:
-      - uses: froazin/action-wsl-setup@main
+      - uses: froazin/action-wsl-setup@v0
         with:
           distribution: Ubuntu-26.04
           wsl-version: 1
@@ -40,7 +40,7 @@ Instances are WSL 2 unless you set `wsl-version: 1`. WSL 2 needs virtualisation,
 Set `image` instead of `distribution` to install an image that isn't in Microsoft's list, and name the instance with `instance-name`:
 
 ```yaml
-      - uses: froazin/action-wsl-setup@main
+      - uses: froazin/action-wsl-setup@v0
         with:
           image: oci://ghcr.io/owner/image:tag
           instance-name: mine
@@ -64,7 +64,7 @@ Call the action once for each instance you need. Give each one its own `instance
 Give the action cloud-init user-data, and it provisions the instance on its first boot:
 
 ```yaml
-      - uses: froazin/action-wsl-setup@main
+      - uses: froazin/action-wsl-setup@v0
         with:
           distribution: Ubuntu-26.04
           cloud-init-user-data: ci/Ubuntu-26.04.user-data
@@ -127,13 +127,15 @@ When the action writes a `.wslconfig`, it runs `wsl --shutdown` so WSL reads it,
 
 ## Development
 
-The action is written in TypeScript and bundled into JavaScript with ncc. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, testing and CI. The design docs explain how each part works:
+The action is written in TypeScript and bundled into JavaScript with ncc. [CONTRIBUTING.md](CONTRIBUTING.md) covers building, testing and pull requests. The design docs explain how each part works:
 
 - [WSL package](docs/wsl-package.md): finding, installing and pinning the WSL package
 - [.wslconfig](docs/wslconfig.md): deciding whether to write `.wslconfig`, and applying it
 - [Distributions](docs/distributions.md): downloading, caching and installing distribution images
 - [Images](docs/images.md): installing an image from a URL, an OCI registry or a file
 - [cloud-init](docs/cloud-init.md): seeding, waiting for and judging cloud-init
+- [CI](docs/ci.md): the checks and Claude's reviews on pull requests
+- [Releases](docs/releases.md): merging, the tests on `main`, release branches, versions, release notes and the wiki
 
 ## Licence
 
