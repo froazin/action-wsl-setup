@@ -37,7 +37,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 - Install dependencies only through npm with this repository's `.npmrc`. Its `min-release-age=7` skips any version published in the last 7 days. Don't override it.
 - Pin every action a workflow uses to a full commit SHA, with its version in a comment.
 - Build, lint and test with the commands in [CONTRIBUTING.md](CONTRIBUTING.md).
-- **Never merge a pull request yourself.** A maintainer reviews and merges every PR, except Dependabot's, which merge themselves once their checks pass. Open a PR when it's ready for review, or a draft while you're still working on it. Write its title and description by [Pull requests](CONTRIBUTING.md#pull-requests), because they become the commit on `main`.
+- **Only Dependabot's pull requests merge themselves in CI.** Every other PR is squash-merged by hand, by a maintainer or an agent working with one, once `CI result` and `PR title and description` pass and every review thread is resolved. Open a PR when it's ready for review, or a draft while you're still working on it. Write its title and description by [Pull requests](CONTRIBUTING.md#pull-requests), because they become the commit on `main`.
 - Resolve a review thread only after you've fixed what it raises, or replied with why it isn't a problem.
 - When you review a change locally, such as with `/code-review`, also follow `REVIEW.md` as it is on `main` (`git show main:REVIEW.md`), not a copy the change edits.
 
