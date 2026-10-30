@@ -95,7 +95,7 @@ The squash-merged commit's message comes from the PR's title and description, an
 - **Resolved threads, not a failing check.** A wrong finding is resolved with a reply rather than a re-run. That's why Nits are capped.
 - **The title check in its own workflow.** Editing a title fires `edited`, which in `ci.yml` would cancel and rerun the tests.
 - **No review of Dependabot's PRs.** They only change dependencies, which the checks and the end-to-end tests on `main` cover.
-- **No required status checks.** The maintainer chose not to require them, and reads the checks before merging.
+- **No required status checks.** A maintainer reads the checks before merging, so the ruleset doesn't require them.
 
 ## Limits
 

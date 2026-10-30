@@ -71,7 +71,7 @@ flowchart TD
 ## Decisions
 
 - **Judge `result.json` and `cloud-init status` together.** After its first run, Ubuntu-26.04 turns cloud-init off, and `status` then reports `disabled-by-marker-file` whether or not it ran, so only `result.json` shows a run finished. But `result.json` had no recoverable errors when `status` listed a deprecated key and a schema warning (both observed).
-- **Fail when the image has no cloud-init.** FedoraLinux-44's image has none (observed). Installing it before the first boot would make the action depend on each distribution's package manager, so the user chose to fail instead.
+- **Fail when the image has no cloud-init.** FedoraLinux-44's image has none (observed). Installing it before the first boot would make the action depend on each distribution's package manager, so the action fails instead.
 - **Fail on degraded by default.** A degraded run usually means user-data that needs fixing, such as a deprecated key. `allow-degraded` covers both cloud-init and systemd.
 - **A post step for the seed files only.** The seed files can hold secrets, so they mustn't outlive a cancelled job on a self-hosted runner. The post step doesn't touch the instance or `.wslconfig`: an instance is what the workflow asked for, and hosted runners are thrown away.
 - **Don't run the distribution's first-run setup.** cloud-init and its `wsl.conf` decide the default user.

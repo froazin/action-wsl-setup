@@ -107,7 +107,7 @@ jobs:
             Read these files in `.pr-check/`:
 
             - `CONTRIBUTING.md`: the rules, in its "Pull requests" section. Check against them, and nothing else.
-            - `CLAUDE.md`: the commit scopes the title may use, in its "Ways of working" section.
+            - `CLAUDE.md`: the commit scopes the title may use, in its "Contributing" section.
             - `title.txt` and `description.md`: what to check. Check only these two files.
             - `commits.txt` and `files.txt`: the branch's commits and the files it changes, so you can tell whether the title and description describe the change. They're context, not something to check. The commits' own `Co-Authored-By:` footers and `---------` lines are expected, and the `-----` lines only separate one commit from the next.
 

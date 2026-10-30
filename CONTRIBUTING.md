@@ -32,7 +32,7 @@ PRs are squash-merged, so the title becomes the commit header on `main` and the 
 
 - **Title:** a [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) header, `type(scope)!: Description`, such as `feat(distro): Add a source input`.
   - The type is lowercase, such as `feat`, `fix`, `refactor`, `test`, `docs`, `ci` or `chore`.
-  - The scope is lowercase and one of the commit scopes in [CLAUDE.md](CLAUDE.md#ways-of-working).
+  - The scope is lowercase and one of the commit scopes in [CLAUDE.md](CLAUDE.md#contributing).
   - The description is an instruction that starts with a capital letter, such as "Add", and doesn't end with a full stop.
   - Leave out the PR number. GitHub adds it when it merges.
 - **Description:** the commit body, in British English. Say what changed and why.

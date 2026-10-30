@@ -6,7 +6,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 
 1. [Layout](#layout)
 1. [Conventions](#conventions)
-1. [Ways of working](#ways-of-working)
+1. [Contributing](#contributing)
 
 ## Layout
 
@@ -41,9 +41,7 @@ A GitHub Action that sets up WSL on GitHub hosted and self-hosted Windows runner
 - Resolve a review thread only after you've fixed what it raises, or replied with why it isn't a problem.
 - When you review a change locally, such as with `/code-review`, also follow `REVIEW.md` as it is on `main` (`git show main:REVIEW.md`), not a copy the change edits.
 
-## Ways of working
-
-This project follows the user's shared ways of working (the `wow-*` skills). These are its specifics and overrides. Anything not listed here uses the shared defaults.
+## Contributing
 
 | Repository | Path | GitHub | Visibility | Default branch | Kind |
 | --- | --- | --- | --- | --- | --- |
@@ -55,7 +53,4 @@ This project follows the user's shared ways of working (the `wow-*` skills). The
 - **Releases:** `release.yml` runs every night. It tests `main` and releases when the built `dist/` or `action.yml` differ from the last release. Each release is a commit on the major version's branch, such as `release/v0`, with `dist/` added, tagged `vX.Y.Z`, with release notes Claude writes. The tags hold the version, in alpha until a maintainer releases `0.1.0` by hand. Don't tag a release, or push to a release branch, yourself. See [docs/releases.md](docs/releases.md).
 - **CI:** `ci.yml` and `pull-request.yml` on every PR to `main`, and the lint, unit and end-to-end tests on `main` before each release. See [docs/ci.md](docs/ci.md).
 - **Build and test:** see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-### Overrides
-
 - User docs live in the wiki, which `wiki.yml` keeps in step with each release. `README.md` is the entry point, which GitHub Marketplace shows. It still holds the full usage docs until the first release's wiki is written from them. Then it's planned to shrink to a quick start with links to the wiki's pages.
