@@ -84,19 +84,20 @@ jobs:
             - `source/README.md` is the entry point for users, which GitHub Marketplace shows. Don't change it.
             - The wiki is the user guide: how to use the action, every input and output, distributions and images, cloud-init, `.wslconfig`, the runners it supports and troubleshooting.
             - Take the facts from `source/action.yml`, which describes every input and output and its default, then `source/README.md` and the design docs in `source/docs/`. The design docs are for engineers: use what they say about behaviour users can see, such as limits and error cases, but don't copy design or implementation detail.
-            - Document only what's in this release. Use `${{ inputs.tag }}` in examples, such as `uses: froazin/action-wsl-setup@${{ inputs.tag }}`.
+            - The code in `source/src/` is the final word. The README and design docs can simplify or leave things out, so check every claim you write against the code: when the action fails and why, which inputs need which, defaults, what each output holds and when it's empty, and what's cached. Quote an error message exactly as the code writes it, and never describe one the code doesn't produce. Don't fill a gap with a guess.
+            - Document only what's in this release. Use `${{ inputs.tag }}` in examples, such as `uses: froazin/action-wsl-setup@${{ inputs.tag }}`. Say that `@release/vMAJOR`, such as `@release/v0`, runs the newest release of that major version, and that a tag pins one release.
 
             ## What to do
 
-            1. Read `source/action.yml`, `source/README.md`, the design docs, the release notes and every page in `wiki/`, including `_Sidebar.md`.
-            2. Find what's missing, wrong or out of date in the wiki for this release.
+            1. Read `source/action.yml`, `source/README.md`, the design docs, the code in `source/src/`, the release notes and every page in `wiki/`, including `_Sidebar.md`.
+            2. Find what's missing, wrong or out of date in the wiki for this release. Check each page's claims against the code, not only against the other docs.
             3. Change only what needs to change. Keep pages that are still right as they are.
             4. When the wiki is empty apart from a placeholder `Home.md`, write it from scratch: `Home.md` with a quick start, then one page per topic.
             5. You can't delete or rename a file. To remove a page, replace its whole content with the single line `<!-- remove this page -->`, and the publish step deletes it. To rename one, write the new page and remove the old one that way, then fix every link to it.
 
             ## Wiki format
 
-            - Every page is a `.md` file at the top of `wiki/`, with no subfolders except `images/`. Name it in sentence case with hyphens between words, such as `Inputs-and-outputs.md`. GitHub shows the hyphens as spaces in the title. Don't put a hyphen inside a word of the title.
+            - Every page is a `.md` file at the top of `wiki/`, with no subfolders except `images/`. Name it in sentence case with hyphens between words, such as `Inputs-and-outputs.md`. GitHub shows every hyphen as a space in the title, so a name can't contain a hyphenated word: name a page about cloud-init `Provisioning.md`, not `Cloud-init.md`.
             - Never add a `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md`, in any case, a `.claude/` folder or any Markdown file that isn't a page: GitHub publishes every `.md` file.
             - Don't start a page with a `#` title, because GitHub shows the file name as the title. Start with a sentence that says what the page covers, then use `##` and `###` headings in sentence case. No YAML front matter and no table of contents.
             - Link to another page with `[[Link text|Page-Name]]`, the text first, and to a heading on another page with `[[Link text|Page-Name#heading-slug]]`. Link to a heading on the same page with `[text](#slug)`, in lowercase. Never link to `Page-Name.md`. Link to files in the repository with absolute URLs, such as `https://github.com/${{ github.repository }}/blob/${{ inputs.tag }}/action.yml`.
