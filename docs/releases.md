@@ -76,7 +76,7 @@ Claude Sonnet 5.5 reads every commit on `main` since the last release, with the 
 
 The wiki at `https://github.com/froazin/action-wsl-setup/wiki` is the user guide. After each release, `wiki.yml` brings it up to date with that release.
 
-- **`edit`** checks out the release's tag and the wiki. Claude Sonnet 5.5 compares the wiki with `action.yml`, the README, the design docs and the release notes, and changes only what's missing, wrong or out of date. The prompt holds the wiki's format rules, such as no `#` title, `[[Link text|Page-Name]]` links and a `_Sidebar.md` that lists every page. Claude can't delete files, so it marks a page to remove with a single `<!-- remove this page -->` line.
+- **`edit`** checks out the release's tag and the wiki. Claude Sonnet 5.5 compares the wiki with `action.yml`, the README, the design docs and the release notes, checks every claim against the code in `src/`, and changes only what's missing, wrong or out of date. The prompt holds the wiki's format rules, such as no `#` title, `[[Link text|Page-Name]]` links and a `_Sidebar.md` that lists every page. Claude can't delete files, so it marks a page to remove with a single `<!-- remove this page -->` line.
 - **`publish`** fails if the edited wiki holds anything but top-level `.md` pages and files in `images/`, including symlinks and agent instruction files such as `CLAUDE.md`. It deletes the marked pages, then commits and pushes to `master`, which publishes at once.
 - Run it by hand for a release with `gh workflow run wiki.yml -f tag=v0.1.0`.
 
