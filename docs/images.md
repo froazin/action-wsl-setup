@@ -85,7 +85,7 @@ sequenceDiagram
 
 ## Decisions
 
-- **`image-sha256` is optional.** The user chose this: some images, such as a nightly build, have no fixed hash to pin. Without one, the action installs what the server sends, so it warns loudly and logs the hash rather than failing.
+- **`image-sha256` is optional.** Some images, such as a nightly build, have no fixed hash to pin. Without one, the action installs what the server sends, so it warns loudly and logs the hash rather than failing.
 - **Don't cache an unchecked URL.** A cache keyed by URL would serve an old file after the server's changed, and the SHA-256 isn't known until the download has finished.
 - **An explicit `oci://` prefix.** A reference such as `ghcr.io/owner/image:tag` also looks like a relative path, so the prefix keeps the three kinds apart.
 - **Public images only, for now.** Anonymous pulls cover images published for others to use. Private images would need credentials for each registry.

@@ -58,9 +58,9 @@ flowchart TD
 ## Decisions
 
 - **`default` only writes on GitHub-hosted runners.** A self-hosted runner is someone's machine, and `.wslconfig` would outlive the job and change every instance on it. `wslconfig-overwrite` doesn't change that, because `default` is what a workflow gets without asking. To write on a self-hosted runner, pass a path.
-- **Fail rather than replace with a path.** The user asked for this: a `.wslconfig` that's already there is someone's own, so replacing it needs `wslconfig-overwrite`.
+- **Fail rather than replace with a path.** A `.wslconfig` that's already there is someone's own, so replacing it needs `wslconfig-overwrite`.
 - **Keep an existing file with `default`.** Failing would break every workflow on a runner image that ships a `.wslconfig`, for settings the workflow never asked for.
-- **Two settings in the default.** `guiApplications=false`, because jobs run without a desktop session. `instanceIdleTimeout=-1`, from the user's dotfiles, so an idle instance keeps running between steps and its services don't start again each time. The end-to-end `default` and `none` cases check that an idle instance keeps running with it and stops without it. Memory and processors keep WSL's own defaults.
+- **Two settings in the default.** `guiApplications=false`, because jobs run without a desktop session. `instanceIdleTimeout=-1`, so an idle instance keeps running between steps and its services don't start again each time. The end-to-end `default` and `none` cases check that an idle instance keeps running with it and stops without it. Memory and processors keep WSL's own defaults.
 - **No post step.** The action doesn't remove or restore `.wslconfig` afterwards. Hosted runners are thrown away, and on a self-hosted runner it only writes the file the workflow passed.
 
 ## Limits

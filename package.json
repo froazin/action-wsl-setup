@@ -1,6 +1,5 @@
 {
   "name": "action-wsl-setup",
-  "version": "0.0.1",
   "description": "Set up WSL on a GitHub hosted Windows runner.",
   "license": "MIT",
   "private": true,

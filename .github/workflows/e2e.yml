@@ -1,21 +1,64 @@
 ---
 name: End-to-end
 
+# ci.yml calls this on a pull request that could change what runners execute. The release workflow calls it on main before
+# it releases, and publishes the dist artifact the build job uploads. Run it by hand to test a branch at any time.
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build and test.
+        required: true
+        type: string
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: e2e-${{ github.workflow }}-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
-
 jobs:
+  # dist/ isn't committed, so it's built once here, and every job tests the same build.
+  build:
+    name: Lint, test and build
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install the dependencies
+        run: npm ci
+
+      - name: Lint and check formatting
+        run: npm run check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run the unit tests
+        run: npm test
+
+      - name: Build dist
+        run: npm run build
+
+      - name: Save dist
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
   package:
     name: Package ${{ matrix.package || 'default' }} on ${{ matrix.os }}
+    needs: build
     runs-on: ${{ matrix.os }}
     # A WSL job can freeze the runner, and then step timeouts never fire.
     timeout-minutes: 20
@@ -38,7 +81,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Set up WSL
         id: wsl
@@ -77,6 +127,7 @@ jobs:
 
   distribution:
     name: ${{ matrix.distribution }} as WSL ${{ matrix.wsl-version }} on ${{ matrix.os }}
+    needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -97,7 +148,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Set up WSL
         id: wsl
@@ -116,17 +174,26 @@ jobs:
 
   cache:
     name: Restore a cached image on windows-2025
-    needs: distribution
+    needs:
+      - build
+      - distribution
     # The image is cached before it's installed, so test the cache even when another
     # distribution job failed.
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     runs-on: windows-2025
     timeout-minutes: 30
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       # The distribution job saved this image to the cache.
       - name: Set up WSL from the cache
@@ -156,13 +223,21 @@ jobs:
 
   no-wsl2:
     name: Explain that windows-11-arm has no WSL 2
+    needs: build
     runs-on: windows-11-arm
     timeout-minutes: 20
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Set up WSL
         id: wsl
@@ -183,6 +258,7 @@ jobs:
 
   cloud-init:
     name: cloud-init ${{ matrix.case }} on ${{ matrix.os }}
+    needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -239,7 +315,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Set up WSL
         id: wsl
@@ -280,6 +363,7 @@ jobs:
 
   image:
     name: image from ${{ matrix.case }} on ${{ matrix.os }}
+    needs: build
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -321,7 +405,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Download an image to the workspace
         if: matrix.image == 'file'
@@ -358,6 +449,7 @@ jobs:
 
   wslconfig:
     name: wslconfig ${{ matrix.case }}
+    needs: build
     runs-on: windows-2025
     timeout-minutes: 20
     strategy:
@@ -393,7 +485,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Put a .wslconfig in place
         if: matrix.existing
@@ -427,13 +526,21 @@ jobs:
 
   not-windows:
     name: Fail on Linux
+    needs: build
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
+
+      - name: Get dist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
 
       - name: Set up WSL
         id: wsl

@@ -3,16 +3,19 @@ version: 2
 updates:
   # A 7-day cooldown, like min-release-age in .npmrc, gives a compromised
   # release time to be caught before Dependabot proposes it.
+  # PRs open at 01:00 UTC, before the nightly release at 05:00 UTC. The prefix gives a "chore(deps):" header,
+  # with a scope from CLAUDE.md.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: weekly
       day: "monday"
+      time: "01:00"
+      timezone: "Etc/UTC"
     allow:
       - dependency-type: "all"
     commit-message:
-      prefix: "chore"
-      include: "scope"
+      prefix: "chore(deps)"
     cooldown:
       default-days: 7
     ignore:
@@ -27,16 +30,18 @@ updates:
         patterns:
           - "*"
 
+  # Wednesday, apart from npm's Monday PR, so there's one to review at a time.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: weekly
-      day: "monday"
+      day: "wednesday"
+      time: "01:00"
+      timezone: "Etc/UTC"
     allow:
       - dependency-type: "all"
     commit-message:
-      prefix: "chore"
-      include: "scope"
+      prefix: "chore(deps)"
     cooldown:
       default-days: 7
     groups:
