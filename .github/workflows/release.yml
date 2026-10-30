@@ -169,7 +169,6 @@ jobs:
           ls -l .release
 
       # Claude only reads files and returns JSON. The next job publishes, without Claude.
-      # Whoever last changed the schedule becomes its actor. If that's ever a bot, the action refuses to run unless it's allowed.
       - name: Write the release notes
         id: notes
         if: steps.ship.outputs.release == 'true'
@@ -178,7 +177,6 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
-          allowed_bots: github-actions[bot],dependabot[bot]
           claude_args: >-
             --model claude-sonnet-5-5
             --max-turns 30

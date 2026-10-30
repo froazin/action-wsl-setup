@@ -93,7 +93,6 @@ The wiki at `https://github.com/froazin/action-wsl-setup/wiki` is the user guide
 - **No write token near the build.** The build that makes `dist/` has a read-only token. The jobs that commit and push run no project code.
 - **No write token near Claude.** Claude only reads files and returns JSON, or edits a copy of the wiki, in jobs with a read-only token. A separate job without Claude publishes or pushes.
 - **Untrusted text stays out.** Dependabot commits' bodies are left out of the release notes. The wiki prompt treats the wiki's pages as data. Only collaborators can edit the wiki, set by "Restrict editing to collaborators only" in the repository's settings. The API can't read that setting, so check it there if it's in doubt.
-- **The schedule's actor.** Whoever last changed the schedule becomes the actor of later scheduled runs, and the Claude action refuses a bot it doesn't allow. GitHub doesn't say which account a merged change makes the actor, so the Claude steps allow `github-actions[bot]` and `dependabot[bot]` with `allowed_bots`. These workflows only run on a schedule or by hand, so that widens nothing.
 
 ## Decisions
 
@@ -107,6 +106,7 @@ The wiki at `https://github.com/froazin/action-wsl-setup/wiki` is the user guide
 - Release tags are made through the API, so they aren't signed. The commits they point to are, and immutable releases stop the tags moving.
 - The end-to-end tests run every night while `main` has changes since the last release that don't change what's released, such as a CI or dev dependency update.
 - GitHub turns off a public repository's scheduled workflows after 60 days with no activity. Turn the release workflow back on in the Actions tab.
+- The Claude action refuses to run when the workflow's actor is a bot. A scheduled run's actor is whoever last changed its schedule, which is always a maintainer, because people merge every PR. If a run ever fails with "Workflow initiated by non-human actor", run `gh workflow disable release.yml && gh workflow enable release.yml` to make yourself the actor again.
 - Dependabot security updates skip the cooldown and `min-release-age`, so one can merge and be released within a day of its publication.
 - The end-to-end tests don't run the other actions the workflows use, such as `anthropics/claude-code-action`. A new version of one first runs in the next workflow that uses it.
 - Claude's choice of `breaking`, `feature` or `other` is a judgement, and the notes can miss or misdescribe a change. Read the job summary, and edit a release's notes if they're wrong.
